@@ -1,8 +1,12 @@
-[![Build and Release App](https://github.com/Chokopieum-Software/MateriaKraft-Launcher/actions/workflows/build.yml/badge.svg)](https://github.com/Chokopieum-Software/MateriaKraft-Launcher/actions/workflows/build.yml)
+[![Build and Release App](https://github.com/Chokopieum-Software/MateriaLauncher/actions/workflows/build.yml/badge.svg)](https://github.com/Chokopieum-Software/MateriaLauncher/actions/workflows/build.yml)
 
-[Русский язык](https://github.com/Chokopieum-Software/MateriaKraft-Launcher/blob/master/README-RU.md)
+[Русский язык](https://github.com/Chokopieum-Software/MateriaLauncher/blob/master/README-RU.md)
 
-**MateriaKraft Launcher** is a modern, fast, and intuitive Minecraft launcher written in Kotlin. We aim to create the best user experience by combining powerful functionality with the aesthetics of Material Design 3.
+> **ARCHIVED PROJECT — DEVELOPMENT DISCONTINUED**
+>
+> This repository documents the former Kotlin-based launcher. A new Windows-native successor is being developed separately.
+
+**MateriaKraft Launcher** was a modern, fast, and intuitive Minecraft launcher written in Kotlin. We aim to create the best user experience by combining powerful functionality with the aesthetics of Material Design 3.
 
 ---
 NOT AN OFFICIAL MINECRAFT [PRODUCT/SERVICE/EVENT, etc.]. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT
@@ -18,12 +22,13 @@ NOT AN OFFICIAL MINECRAFT [PRODUCT/SERVICE/EVENT, etc.]. NOT APPROVED BY OR ASSO
 
 ---
 
-## 🚧 Project Status: Alpha
+## 🛑 Project Status: Discontinued (October 2026)
 
-The project is in the **early alpha stage**. This means:
-- Bugs and instability are possible.
-- Functionality is actively being added and changed.
-- We are open to suggestions and bug reports!
+**Development of MateriaKraft Launcher has ended.** This unfinished alpha project is preserved for reference. No new features, bug fixes, or releases are planned.
+
+Development has shifted to a **new, Windows-only Minecraft launcher**, built from scratch with **C#, .NET, WinUI 3, and Windows App SDK**. This is a separate project; no successor repository or release is announced here.
+
+The original source code and commit history remain available under the existing MIT license.
 
 ---
 
@@ -52,17 +57,9 @@ Check build.md
 
 ---
 ---
-## When is the release?
+## Previous plans
 
-The first compiled alpha builds will be published in the second half of February. The launcher's estimated release date is Q3 2026.
-
-## 🗺 Roadmap
-
-- [ ] Working with official authorization (partially implemented).
-- [ ] API integration with platforms (Modrinth, CurseForge, Technic, ATLauncher).
-- [ ] Android support (release date TBD).
-- [ ] Beautiful and intuitive UI.
-- [ ] Full localization (EN/RU).
+The original release schedule and roadmap are no longer active. Development ended before the planned release.
 
 ---
 
