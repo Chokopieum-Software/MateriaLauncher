@@ -1,6 +1,10 @@
-[![Build and Release App](https://github.com/Chokopieum-Software/MateriaKraft-Launcher/actions/workflows/build.yml/badge.svg)](https://github.com/Chokopieum-Software/MateriaKraft-Launcher/actions/workflows/build.yml)
+[![Build and Release App](https://github.com/Chokopieum-Software/MateriaLauncher/actions/workflows/build.yml/badge.svg)](https://github.com/Chokopieum-Software/MateriaLauncher/actions/workflows/build.yml)
 
-[English language](https://github.com/Chokopieum-Software/MateriaKraft-Launcher/blob/master/README.md)
+[English language](https://github.com/Chokopieum-Software/MateriaLauncher/blob/master/README.md)
+
+> **АРХИВНЫЙ ПРОЕКТ — РАЗРАБОТКА ПРЕКРАЩЕНА**
+>
+> Здесь сохранён прежний лаунчер на Kotlin. Новый лаунчер для Windows разрабатывается отдельно.
 
 **MateriaKraft Launcher** — это современный, быстрый и интуитивно понятный лаунчер для Minecraft, написанный на Kotlin. Мы стремимся создать лучший пользовательский опыт, сочетая мощную функциональность с эстетикой Material Design 3.
 
@@ -18,12 +22,13 @@
 
 ---
 
-## 🚧 Статус проекта: Альфа
+## 🛑 Статус проекта: разработка прекращена (октябрь 2026)
 
-Проект находится на **ранней стадии альфа-тестирования**. Это означает:
-- Возможны баги и нестабильная работа.
-- Функциональность активно добавляется и изменяется.
-- Мы открыты для предложений и отчетов об ошибках!
+**Разработка MateriaKraft Launcher прекращена.** Незавершённая альфа-версия сохраняется для ознакомления. Новые функции, исправления ошибок и релизы не планируются.
+
+Разработка переключена на **новый лаунчер Minecraft исключительно для Windows**, создаваемый с нуля на **C#, .NET, WinUI 3 и Windows App SDK**. Это отдельный проект; ссылка на новый репозиторий и дата выпуска пока не объявлены.
+
+Исходный код и история коммитов остаются доступными по действующей лицензии MIT.
 
 ---
 
@@ -52,17 +57,9 @@
 
 ---
 ---
-## Когда релиз?
+## Прежние планы
 
-Первые скомпилированные альфа-сборки будут опубликованы во второй половине февраля. Предполагаемая дата релиза лаунчера — 3 квартал 2026 года.
-
-## 🗺 Дорожная карта
-
-- [ ] Работа с официальной авторизацией (частично реализовано).
-- [ ] Интеграция API с платформами (Modrinth, CurseForge, Technic, ATLauncher).
-- [ ] Поддержка Android (дата релиза будет определена позже).
-- [ ] Красивый и интуитивно понятный пользовательский интерфейс.
-- [ ] Полная локализация (EN/RU).
+Первоначальные сроки выпуска и дорожная карта больше не актуальны. Разработка завершилась до запланированного релиза.
 
 ---
 
