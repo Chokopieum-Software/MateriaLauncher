@@ -9,9 +9,12 @@ import kotlin.test.*
 class CallbackLauncherTest {
     @Test fun launcherJarPreservesLongClasspathAndCallback() {
         if (!System.getProperty("os.name").startsWith("Windows")) return
-        val root = Files.createTempDirectory("materia callback игрок ")
+        val root = Files.createTempDirectory("materia-callback-")
         try {
-            val source = root.resolve("InitKt.java")
+            // java.exe's -jar path is decoded using the Windows system code page.
+            // Exercise Unicode in the manifest classpath, independently of that launcher limitation.
+            val classes = Files.createDirectories(root.resolve("classes игрок with spaces"))
+            val source = classes.resolve("InitKt.java")
             Files.writeString(source, """
                 public class InitKt {
                     public static void main(String[] args) throws Exception {
@@ -21,10 +24,10 @@ class CallbackLauncherTest {
                 }
             """.trimIndent())
             assertEquals(0, ToolProvider.getSystemJavaCompiler().run(null, null, null,
-                "-d", root.toString(), source.toString()))
+                "-d", classes.toString(), source.toString()))
             val javaExecutable = Path.of(System.getProperty("java.home"), "bin", "java.exe")
-            val classpath = root.toString() + ";" + (1..500).joinToString(";") {
-                root.resolve("dependency-$it.jar").toString()
+            val classpath = classes.toString() + ";" + (1..500).joinToString(";") {
+                classes.resolve("dependency-$it.jar").toString()
             }
             assertTrue(classpath.length > 20000)
             val command = MicrosoftCallback.sourceLaunchCommand(javaExecutable, classpath, root)
