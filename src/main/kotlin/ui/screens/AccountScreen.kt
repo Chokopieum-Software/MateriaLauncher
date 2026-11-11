@@ -37,6 +37,9 @@ import funlauncher.auth.AccountManager
 import funlauncher.auth.MicrosoftAccount
 import funlauncher.auth.OfflineAccount
 import ui.viewmodel.AccountViewModel
+import ui.viewmodel.MicrosoftLoginState
+import ui.widgets.MicrosoftLoginFeedback
+import org.chokopieum.software.ui.ProgressState
 import ui.widgets.AvatarImage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,12 +54,20 @@ fun AccountScreen(
     val viewModel = remember { AccountViewModel(accountManager, coroutineScope) }
     val accounts by viewModel.accounts.collectAsState()
     val isLoggingIn by viewModel.isLoggingIn.collectAsState()
+    val loginState by viewModel.loginState.collectAsState()
+    val loginError by viewModel.loginError.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
     var showAddAccountTypeDialog by remember { mutableStateOf(false) }
     var showAddOfflineAccountDialog by remember { mutableStateOf(false) }
     var accountToDelete by remember { mutableStateOf<Account?>(null) }
-    var showBrowserLoginDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(loginState) {
+        if (loginState == MicrosoftLoginState.Success) {
+            kotlinx.coroutines.delay(2200)
+            viewModel.dismissLoginResult()
+        }
+    }
 
     val visibleState = remember { MutableTransitionState(false).apply { targetState = true } }
     LaunchedEffect(visibleState.currentState) {
@@ -74,8 +85,8 @@ fun AccountScreen(
         MaterialTheme(colorScheme = colorScheme) {
             AnimatedVisibility(
                 visibleState = visibleState,
-                enter = expandVertically(animationSpec = tween(250), expandFrom = Alignment.Top) + fadeIn(animationSpec = tween(250)),
-                exit = shrinkVertically(animationSpec = tween(250), shrinkTowards = Alignment.Top) + fadeOut(animationSpec = tween(250))
+                enter = fadeIn(animationSpec = tween(250)),
+                exit = fadeOut(animationSpec = tween(250))
             ) {
                 Box(
                     modifier = Modifier
@@ -115,7 +126,7 @@ fun AccountScreen(
                                     contentPadding = PaddingValues(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    items(accounts, key = { it.uuid ?: it.username }) { account ->
+                                    items(accounts, key = { "${it::class.simpleName}:${it.uuid}:${it.username}" }) { account ->
                                         Card(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -167,36 +178,35 @@ fun AccountScreen(
                                     }
                                 }
                             }
-                            if (isLoggingIn) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(colorScheme.surface.copy(alpha = 0.7f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator()
-                                }
-                            }
                         }
                     }
                 }
             }
         }
 
-        if (showBrowserLoginDialog) {
-            Dialog(onDismissRequest = {}) {
+        if (loginState != MicrosoftLoginState.Idle) {
+            Dialog(onDismissRequest = { if (!isLoggingIn) viewModel.dismissLoginResult() }) {
                 Surface(
                     modifier = Modifier.padding(16.dp),
                     shape = RoundedCornerShape(16.dp),
                     color = colorScheme.surface
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier.padding(24.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        CircularProgressIndicator(color = colorScheme.primary)
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Text("Продолжите в браузере...", color = colorScheme.onSurface)
+                        MicrosoftLoginFeedback(
+                            state = when (loginState) {
+                                MicrosoftLoginState.Success -> ProgressState.Success
+                                MicrosoftLoginState.Error -> ProgressState.Error
+                                else -> ProgressState.Loading
+                            },
+                            error = loginError
+                        )
+                        if (loginState == MicrosoftLoginState.Error) {
+                            TextButton(onClick = { viewModel.dismissLoginResult() }) { Text("Закрыть") }
+                        }
                     }
                 }
             }
@@ -212,9 +222,7 @@ fun AccountScreen(
                     Button(
                         onClick = {
                             showAddAccountTypeDialog = false
-                            showBrowserLoginDialog = true
                             viewModel.loginWithMicrosoft()
-                            showBrowserLoginDialog = false
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colorScheme.primary,
@@ -267,8 +275,7 @@ fun AccountScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            viewModel.addOfflineAccount(username)
-                            if (errorMessage == null) {
+                            viewModel.addOfflineAccount(username) {
                                 showAddOfflineAccountDialog = false
                             }
                         },

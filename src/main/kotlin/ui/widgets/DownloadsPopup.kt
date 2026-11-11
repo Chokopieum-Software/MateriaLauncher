@@ -40,8 +40,8 @@ fun DownloadsPopup(
             popupContentSize: androidx.compose.ui.unit.IntSize
         ): androidx.compose.ui.unit.IntOffset {
             return androidx.compose.ui.unit.IntOffset(
-                x = anchorBounds.left - popupContentSize.width - 16, // Слева от кнопки
-                y = anchorBounds.top - popupContentSize.height // На уровне верхней части кнопки
+                x = (anchorBounds.right - popupContentSize.width).coerceIn(0, (windowSize.width - popupContentSize.width).coerceAtLeast(0)),
+                y = anchorBounds.bottom
             )
         }
     }
@@ -105,6 +105,13 @@ private fun DownloadTaskItem(task: DownloadTask) {
                 }
             }
         }
+        Spacer(Modifier.height(4.dp))
+        val stats = task.transferStats.value
+        Text(
+            text = formatTransferStats(stats),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Spacer(Modifier.height(4.dp))
         LinearProgressIndicator(
             progress = { task.progress.value },

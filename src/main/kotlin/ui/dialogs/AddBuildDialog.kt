@@ -10,24 +10,19 @@ package ui.dialogs
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import ui.widgets.MorphingCreationPanel
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import funlauncher.*
 import funlauncher.game.*
 import funlauncher.managers.PathManager
-import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,14 +30,19 @@ import java.io.File
 fun AddBuildDialog(
     onDismiss: () -> Unit,
     onAdd: (String, String, BuildType, String?) -> Unit,
-    pathManager: PathManager
+    pathManager: PathManager,
+    sourceBounds: Rect? = null
 ) {
     var name by remember { mutableStateOf("") }
     var selectedMcVersion by remember { mutableStateOf<MinecraftVersion?>(null) }
     var selectedLoaderVersion by remember { mutableStateOf("") }
     var modLoader by remember { mutableStateOf(BuildType.VANILLA) }
 
-    var showVersionSelectionDialog by remember { mutableStateOf(false) }
+    var versionListExpanded by remember { mutableStateOf(true) }
+    var versionsLoading by remember { mutableStateOf(true) }
+    var versionsError by remember { mutableStateOf<String?>(null) }
+    var versionsRetry by remember { mutableStateOf(0) }
+    var loaderError by remember { mutableStateOf<String?>(null) }
 
     var vanillaVersions by remember { mutableStateOf<List<MinecraftVersion>>(emptyList()) }
     var fabricLoaderVersions by remember { mutableStateOf<List<FabricVersion>>(emptyList()) }
@@ -54,85 +54,78 @@ fun AddBuildDialog(
 
     var isLoading by remember { mutableStateOf(false) }
 
-    val scope = rememberCoroutineScope()
     val versionManager = remember { VersionManager(pathManager) }
 
     val visibleState = remember { MutableTransitionState(false).apply { targetState = true } }
+    var pendingCreation by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    LaunchedEffect(visibleState.currentState) {
-        if (!visibleState.currentState && !visibleState.targetState) {
+    LaunchedEffect(visibleState.isIdle, visibleState.currentState, visibleState.targetState) {
+        if (visibleState.isIdle && !visibleState.currentState && !visibleState.targetState) {
+            val create = pendingCreation
+            pendingCreation = null
             onDismiss()
+            create?.invoke()
         }
     }
 
-    LaunchedEffect(Unit) {
-        isLoading = true
-        scope.launch {
+    LaunchedEffect(versionsRetry) {
+        versionsLoading = true
+        versionsError = null
+        try {
             vanillaVersions = versionManager.getMinecraftVersions()
-            forgeVersions = versionManager.getForgeVersions()
-            neoForgeVersions = versionManager.getNeoForgeVersions()
-            isLoading = false
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            versionsError = "Не удалось загрузить список версий. Проверьте подключение к сети."
+        } finally {
+            versionsLoading = false
         }
     }
 
     LaunchedEffect(selectedMcVersion, modLoader) {
         selectedLoaderVersion = ""
-        selectedMcVersion?.let { mcVersion ->
+        loaderError = null
+        isLoading = false
+        val mcVersion = selectedMcVersion ?: return@LaunchedEffect
+        if (!mcVersion.supportsModLoaders()) {
+            modLoader = BuildType.VANILLA
+            return@LaunchedEffect
+        }
+        if (modLoader == BuildType.VANILLA) return@LaunchedEffect
+        isLoading = true
+        try {
             when (modLoader) {
                 BuildType.FABRIC -> {
-                    isLoading = true
-                    fabricLoaderVersions = emptyList()
-                    scope.launch {
-                        fabricLoaderVersions = versionManager.getFabricLoaderVersions(mcVersion.id)
-                        selectedLoaderVersion = fabricLoaderVersions.firstOrNull { it.stable }?.version ?: fabricLoaderVersions.firstOrNull()?.version ?: ""
-                        isLoading = false
-                    }
+                    fabricLoaderVersions = versionManager.getFabricLoaderVersions(mcVersion.id)
+                    selectedLoaderVersion = fabricLoaderVersions.firstOrNull { it.stable }?.version ?: fabricLoaderVersions.firstOrNull()?.version ?: ""
                 }
                 BuildType.FORGE -> {
+                    if (forgeVersions.isEmpty()) forgeVersions = versionManager.getForgeVersions()
                     applicableForgeVersions = forgeVersions.filter { it.mcVersion == mcVersion.id }
-                    val recommended = applicableForgeVersions.find { it.isRecommended }
-                    val latest = applicableForgeVersions.find { it.isLatest }
-                    selectedLoaderVersion = recommended?.forgeVersion ?: latest?.forgeVersion ?: applicableForgeVersions.firstOrNull()?.forgeVersion ?: ""
+                    selectedLoaderVersion = (applicableForgeVersions.find { it.isRecommended }
+                        ?: applicableForgeVersions.find { it.isLatest } ?: applicableForgeVersions.firstOrNull())?.forgeVersion ?: ""
                 }
                 BuildType.QUILT -> {
-                    isLoading = true
-                    quiltLoaderVersions = emptyList()
-                    scope.launch {
-                        quiltLoaderVersions = versionManager.getQuiltLoaderVersions(mcVersion.id)
-                        selectedLoaderVersion = quiltLoaderVersions.firstOrNull()?.version ?: ""
-                        isLoading = false
-                    }
+                    quiltLoaderVersions = versionManager.getQuiltLoaderVersions(mcVersion.id)
+                    selectedLoaderVersion = quiltLoaderVersions.firstOrNull()?.version ?: ""
                 }
                 BuildType.NEOFORGE -> {
+                    if (neoForgeVersions.isEmpty()) neoForgeVersions = versionManager.getNeoForgeVersions()
                     applicableNeoForgeVersions = neoForgeVersions.filter { it.mcVersion == mcVersion.id }
                     selectedLoaderVersion = applicableNeoForgeVersions.firstOrNull()?.neoForgeVersion ?: ""
                 }
-                else -> {
-                    // No loader for Vanilla
-                }
+                else -> Unit
             }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            loaderError = "Не удалось загрузить версии загрузчика. Выберите другой загрузчик или повторите выбор."
+        } finally {
+            isLoading = false
         }
     }
 
-    if (showVersionSelectionDialog) {
-        VersionSelectionDialog(
-            versions = vanillaVersions,
-            onDismiss = { showVersionSelectionDialog = false },
-            onVersionSelected = {
-                selectedMcVersion = it
-                showVersionSelectionDialog = false
-            }
-        )
-    }
-
-    Dialog(onDismissRequest = { visibleState.targetState = false }) {
-        AnimatedVisibility(
-            visibleState = visibleState,
-            enter = fadeIn(tween(250)) + slideInVertically(tween(250)) { it / 8 },
-            exit = fadeOut(tween(250)) + slideOutVertically(tween(250)) { it / 8 }
-        ) {
-            Card(Modifier.fillMaxWidth(0.9f).fillMaxHeight(0.9f)) {
-                Column(Modifier.padding(16.dp)) {
+    MorphingCreationPanel(visibleState, sourceBounds) {
+            Box(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().padding(16.dp)) {
                     Text("Новая сборка", style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.height(16.dp))
 
@@ -145,21 +138,25 @@ fun AddBuildDialog(
                     )
                     Spacer(Modifier.height(16.dp))
 
-                    OutlinedTextField(
-                        value = "",
-                        onValueChange = {},
-                        label = { Text("Добавить в группу (заглушка)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = false
+                    InlineVersionPicker(
+                        versions = vanillaVersions, selected = selectedMcVersion,
+                        expanded = versionListExpanded, loading = versionsLoading, error = versionsError,
+                        onRetry = { versionsRetry++ }, onExpandedChange = { versionListExpanded = it },
+                        onSelected = {
+                            selectedMcVersion = it
+                            modLoader = BuildType.VANILLA
+                            selectedLoaderVersion = ""
+                            versionListExpanded = false
+                        }
                     )
                     Spacer(Modifier.height(16.dp))
 
-                    Button(onClick = { showVersionSelectionDialog = true }) {
-                        Text(selectedMcVersion?.id ?: "Выберите версию")
+                    if (selectedMcVersion?.supportsModLoaders() == false && !versionListExpanded) {
+                        Text("Для альфа- и бета-версий используется Vanilla без загрузчика модов.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Spacer(Modifier.height(16.dp))
-
-                    AnimatedVisibility(visible = selectedMcVersion != null) {
+                    AnimatedVisibility(visible = selectedMcVersion?.supportsModLoaders() == true && !versionListExpanded) {
                         Column {
                             Text("Загрузчик модов", style = MaterialTheme.typography.labelMedium)
                             Spacer(Modifier.height(8.dp))
@@ -194,7 +191,7 @@ fun AddBuildDialog(
                                 var loaderExpanded by remember { mutableStateOf(false) }
                                 ExposedDropdownMenuBox(expanded = loaderExpanded, onExpandedChange = { loaderExpanded = !loaderExpanded }) {
                                     OutlinedTextField(
-                                        value = if (selectedMcVersion == null) "Сначала выберите версию" else selectedLoaderVersion.ifEmpty { "Загрузка..." },
+                                        value = selectedLoaderVersion.ifEmpty { if (isLoading) "Загрузка..." else "Нет совместимой версии" },
                                         onValueChange = {},
                                         readOnly = true,
                                         label = { Text("Версия загрузчика") },
@@ -258,6 +255,7 @@ fun AddBuildDialog(
                                     }
                                 }
                                 Spacer(Modifier.height(16.dp))
+                                if (loaderError != null) Text(loaderError!!, color = MaterialTheme.colorScheme.error)
                             }
                         }
                     }
@@ -275,20 +273,14 @@ fun AddBuildDialog(
                                     BuildType.NEOFORGE -> "${selectedMcVersion!!.id}-neoforge-$selectedLoaderVersion"
                                     else -> selectedMcVersion!!.id
                                 }
-                                val backgroundsDir = File("src/main/resources/backgrounds")
-                                val randomImage = if (backgroundsDir.exists() && backgroundsDir.isDirectory) {
-                                    backgroundsDir.listFiles()?.randomOrNull()?.absolutePath
-                                } else {
-                                    null
-                                }
-                                onAdd(name, finalVersion, modLoader, randomImage)
+                                pendingCreation = { onAdd(name, finalVersion, modLoader, null) }
                                 visibleState.targetState = false
                             },
-                            enabled = name.isNotBlank() && selectedMcVersion != null && (modLoader == BuildType.VANILLA || selectedLoaderVersion.isNotBlank())
+                            enabled = name.isNotBlank() && selectedMcVersion != null && !versionListExpanded && !isLoading &&
+                                (modLoader == BuildType.VANILLA || selectedLoaderVersion.isNotBlank())
                         ) { Text("Создать") }
                     }
                 }
             }
-        }
     }
 }

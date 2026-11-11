@@ -26,6 +26,7 @@ class AccountManager(pathManager: PathManager) {
 
     init {
         migrateFromJson(pathManager)
+        accountDao.clearMicrosoftTokens()
         _accounts.value = accountDao.getAll()
     }
 
@@ -93,43 +94,22 @@ class AccountManager(pathManager: PathManager) {
         return true
     }
 
-    fun loginWithMicrosoft(): Boolean {
-        return try {
-            val authenticator = MateriaAuthenticator()
-            val profile = authenticator.login()
-
-            val account = if (profile.isLicensed) {
-                MicrosoftAccount(
-                    username = profile.name,
-                    uuid = profile.id,
-                    accessToken = profile.accessToken,
-                    skinUrl = profile.skinUrl,
-                    isLicensed = true
-                )
-            } else {
-                OfflineAccount(
-                    username = profile.name,
-                    uuid = profile.id,
-                    accessToken = profile.accessToken,
-                    isLicensed = false
-                )
-            }
-            addAccount(account)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
-        }
+    fun loginWithMicrosoft(): Boolean = synchronized(MateriaAuthenticator.sessionLock) {
+        val profile = MateriaAuthenticator().login()
+        accountDao.saveMicrosoft(MicrosoftAccount(
+            username = profile.name, uuid = profile.id, accessToken = "", skinUrl = profile.skinUrl
+        ))
+        _accounts.value = accountDao.getAll()
+        true
     }
 
-    fun logoutFromMicrosoft() {
-        val authenticator = MateriaAuthenticator()
-        authenticator.logout()
-
+    fun logoutFromMicrosoft() = synchronized(MateriaAuthenticator.sessionLock) {
+        MateriaAuthenticator().logout(accountDao.getAll().filterIsInstance<MicrosoftAccount>().map { it.uuid })
         accountDao.deleteAllMicrosoft()
         _accounts.value = accountDao.getAll()
     }
-
-    fun deleteAccount(account: Account) {
+    fun deleteAccount(account: Account) = synchronized(MateriaAuthenticator.sessionLock) {
+        if (account is MicrosoftAccount) MateriaAuthenticator().forget(account.uuid)
         accountDao.delete(account)
         _accounts.value = accountDao.getAll()
     }

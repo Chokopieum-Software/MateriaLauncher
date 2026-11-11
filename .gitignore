@@ -43,3 +43,10 @@ bin/
 ### Mac OS ###
 .DS_Store
 /MLCA/
+
+# Local development SDK and downloads
+/.tools/
+
+# Local installer and JVM crash logs
+/forge-installer-1.12.2-forge-14.23.5.2864.jar.log
+/hs_err_pid10428.log

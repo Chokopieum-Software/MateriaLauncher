@@ -55,20 +55,15 @@ class GameLauncher(
         customJavaArgs: String,
         envVars: String
     ): LaunchPayload {
+        val options = funlauncher.utils.validateLaunchOptions(customJavaArgs, envVars, maxRamMb)
+        require(options.valid) { (options.argumentErrors + options.environmentErrors).joinToString("\n") }
         extractNatives()
         val commandList = buildLaunchCommand(account, javaPath, maxRamMb, customJavaArgs)
 
-        val envMap = if (envVars.isNotBlank()) {
-            envVars.lines().mapNotNull { line ->
-                val parts = line.split("=", limit = 2)
-                if (parts.size == 2) parts[0].trim() to parts[1].trim() else null
-            }.toMap()
-        } else {
-            emptyMap()
-        }
+        val envMap = options.environment
         
         logger.info("--- LAUNCH PAYLOAD ---")
-        logger.info("Command: ${commandList.joinToString(" ")}")
+        logger.info("Command: <hidden: contains authentication credentials>")
         logger.info("WorkDir: ${gameDir.toAbsolutePath()}")
         logger.info("Environment: $envMap")
         logger.info("----------------------")
@@ -88,20 +83,15 @@ class GameLauncher(
 
         val osName = getOsName()
         val arch = getArch()
-        val isLinuxArm = osName == "linux" && arch == "arm64"
 
         versionInfo.libraries
-            .filter { it.downloads?.classifiers != null && isRuleApplicable(it.rules ?: emptyList()) }
+            .filter { it.natives != null && isRuleApplicable(it.rules ?: emptyList()) }
             .forEach { lib ->
-                if (isLinuxArm && lib.name.startsWith("org.lwjgl")) {
-                    return@forEach
-                }
-
-                val classifiers = lib.downloads!!.classifiers!!
                 val nativeKey = lib.natives?.get(osName)?.replace("\${arch}", arch)
-
-                classifiers[nativeKey]?.let { artifact ->
-                    val jarPath = globalLibrariesDir.resolve(artifact.path)
+                val nativePath = lib.downloads?.classifiers?.get(nativeKey)?.path
+                    ?: if (lib.downloads == null && nativeKey != null) getArtifactPath(lib.name, nativeKey) else null
+                nativePath?.let { path ->
+                    val jarPath = globalLibrariesDir.resolve(path)
                     if (jarPath.exists()) {
                         extractJarContents(jarPath)
                     } else {
@@ -110,24 +100,6 @@ class GameLauncher(
                 }
             }
 
-        if (isLinuxArm) {
-            logger.info("Linux ARM detected. Forcing LWJGL 3.3.3 natives.")
-            val lwjglArtifacts = listOf(
-                "lwjgl", "lwjgl-glfw", "lwjgl-jemalloc", "lwjgl-openal", "lwjgl-opengl", "lwjgl-stb", "lwjgl-tinyfd"
-            )
-            val lwjglVersion = "3.3.3"
-            val nativeClassifier = "natives-linux-arm64"
-
-            lwjglArtifacts.forEach { artifactName ->
-                val artifactPath = "org/lwjgl/$artifactName/$lwjglVersion/$artifactName-$lwjglVersion-$nativeClassifier.jar"
-                val jarPath = globalLibrariesDir.resolve(artifactPath)
-                if (jarPath.exists()) {
-                    extractJarContents(jarPath)
-                } else {
-                    logger.warn("Required LWJGL native JAR not found, this might cause a crash: ${jarPath.pathString}")
-                }
-            }
-        }
     }
 
     private fun extractJarContents(jarPath: Path) {
@@ -165,13 +137,21 @@ class GameLauncher(
 
         // Modern argument format (1.13+)
         if (versionInfo.arguments != null) {
-            processArguments(versionInfo.arguments.jvm).map(replacePlaceholders).let { finalCommand.addAll(it) }
+            val jvmArgs = processArguments(versionInfo.arguments.jvm)
+            if (jvmArgs.none { it.startsWith("-Djava.library.path=") }) {
+                finalCommand.add("-Djava.library.path=" + nativesDir.toAbsolutePath())
+            }
+            if (jvmArgs.none { it in listOf("-cp", "-classpath", "--class-path") || it.startsWith("--class-path=") }) {
+                finalCommand.addAll(listOf("-cp", classpath.joinToString(File.pathSeparator)))
+            }
+            finalCommand.addAll(jvmArgs.map(replacePlaceholders))
             if (customJavaArgs.isNotBlank()) {
-                finalCommand.addAll(customJavaArgs.split(Regex("\\s+")).map(replacePlaceholders))
+                finalCommand.addAll(funlauncher.utils.parseJavaArguments(customJavaArgs).map(replacePlaceholders))
             }
             finalCommand.add(versionInfo.mainClass ?: "net.minecraft.client.main.Main")
             val gameArgsSource = versionInfo.arguments.game
-            val processedGameArgs = processArguments(gameArgsSource).map(replacePlaceholders)
+            val legacyArgs = versionInfo.gameArguments?.let { funlauncher.utils.parseJavaArguments(it) } ?: emptyList()
+            val processedGameArgs = (legacyArgs + processArguments(gameArgsSource)).map(replacePlaceholders)
             finalCommand.addAll(filterUndesiredArgs(processedGameArgs))
         } else { // Legacy argument format (pre-1.13)
             finalCommand.add("-Djava.library.path=\${natives_directory}")
@@ -179,11 +159,11 @@ class GameLauncher(
             finalCommand.add(classpath.joinToString(File.pathSeparator))
 
             if (customJavaArgs.isNotBlank()) {
-                finalCommand.addAll(customJavaArgs.split(Regex("\\s+")).map(replacePlaceholders))
+                finalCommand.addAll(funlauncher.utils.parseJavaArguments(customJavaArgs).map(replacePlaceholders))
             }
             finalCommand.add(versionInfo.mainClass ?: "net.minecraft.client.main.Main")
             versionInfo.gameArguments?.let { args ->
-                finalCommand.addAll(args.split(Regex("\\s+")).map(replacePlaceholders))
+                finalCommand.addAll(funlauncher.utils.parseJavaArguments(args).map(replacePlaceholders))
             }
         }
 
@@ -195,7 +175,7 @@ class GameLauncher(
         }
 
         logger.info("--- FINAL LAUNCH COMMAND ---")
-        logger.info(fullyReplacedCommand.joinToString(" "))
+        logger.info("Command: <hidden: contains authentication credentials>")
         logger.info("----------------------------")
 
         return fullyReplacedCommand
@@ -203,34 +183,13 @@ class GameLauncher(
 
     private fun buildClasspathList(): List<String> {
         val cpList = mutableListOf<String>()
-        val osName = getOsName()
-        val arch = getArch()
-        val isLinuxArm = osName == "linux" && arch == "arm64"
 
         versionInfo.libraries.forEach { lib ->
             if (isRuleApplicable(lib.rules ?: emptyList())) {
-                if (isLinuxArm && lib.name.startsWith("org.lwjgl")) {
-                    return@forEach
-                }
-
+                if (lib.downloads?.artifact == null &&
+                    (lib.downloads != null || lib.natives != null)) return@forEach
                 val path = lib.downloads?.artifact?.path ?: getArtifactPath(lib.name)
                 cpList.add(globalLibrariesDir.resolve(path).toAbsolutePath().toString())
-            }
-        }
-
-        if (isLinuxArm) {
-            logger.info("Linux ARM detected. Forcing LWJGL 3.3.3 on classpath.")
-            val lwjglArtifacts = listOf(
-                "lwjgl", "lwjgl-glfw", "lwjgl-jemalloc", "lwjgl-openal", "lwjgl-opengl", "lwjgl-stb", "lwjgl-tinyfd"
-            )
-            val lwjglVersion = "3.3.3"
-            val nativeClassifier = "natives-linux-arm64"
-
-            lwjglArtifacts.forEach { artifactName ->
-                val mainJarPath = "org/lwjgl/$artifactName/$lwjglVersion/$artifactName-$lwjglVersion.jar"
-                cpList.add(globalLibrariesDir.resolve(mainJarPath).toAbsolutePath().toString())
-                val nativeJarPath = "org/lwjgl/$artifactName/$lwjglVersion/$artifactName-$lwjglVersion-$nativeClassifier.jar"
-                cpList.add(globalLibrariesDir.resolve(nativeJarPath).toAbsolutePath().toString())
             }
         }
 
@@ -251,6 +210,8 @@ class GameLauncher(
         "launcher_name" to "MateriaKraft",
         "launcher_version" to "1.0",
         "classpath" to classpath,
+        "library_directory" to globalLibrariesDir.toAbsolutePath().toString(),
+        "classpath_separator" to File.pathSeparator,
         "auth_player_name" to account.username,
         "version_name" to versionInfo.id,
         "game_directory" to gameDir.toAbsolutePath().toString(),
@@ -304,30 +265,9 @@ class GameLauncher(
         return finalArgs
     }
 
-    private fun getArtifactPath(name: String, classifier: String? = null): String {
-        val parts = name.split(':')
-        val groupPath = parts[0].replace('.', '/')
-        val artifactName = parts[1]
-        val version = parts[2]
-        val classifierStr = if (classifier != null) "-$classifier" else ""
-        return "$groupPath/$artifactName/$version/$artifactName-$version$classifierStr.jar"
-    }
+    private fun getArtifactPath(name: String, classifier: String? = null): String = mavenArtifactPath(name, classifier)
 
-    private fun isRuleApplicable(rules: List<VersionInfo.Rule>): Boolean {
-        if (rules.isEmpty()) return true
-        var finalAction = "allow" // Default to allow if no specific rule matches
-
-        for (rule in rules) {
-            val osRule = rule.os
-            if (osRule?.name == getOsName()) {
-                finalAction = rule.action
-            } else if (osRule == null) {
-                // Rule applies to all OS, but might be overridden by a more specific rule later
-                finalAction = rule.action
-            }
-        }
-        return finalAction == "allow"
-    }
+    private fun isRuleApplicable(rules: List<VersionInfo.Rule>): Boolean = rulesApply(rules, getOsName())
 
     private fun getOsName(): String = when {
         System.getProperty("os.name").lowercase().contains("win") -> "windows"
@@ -335,10 +275,5 @@ class GameLauncher(
         else -> "linux"
     }
 
-    private fun getArch(): String = when (val arch = System.getProperty("os.arch").lowercase()) {
-        "aarch64" -> "arm64"
-        "x86_64", "amd64" -> "x64"
-        "x86" -> "x86"
-        else -> arch
-    }
+    private fun getArch(): String = nativeArch()
 }

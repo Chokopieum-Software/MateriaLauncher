@@ -2,151 +2,104 @@ package funlauncher.modpack
 
 import funlauncher.BuildType
 import funlauncher.managers.BuildManager
-import funlauncher.managers.PathManager
-import funlauncher.net.DownloadManager
-import funlauncher.net.ModrinthApi
-import funlauncher.net.Network
-import funlauncher.net.Version
-import funlauncher.utils.BannerGenerator
-import io.ktor.client.call.*
-import io.ktor.client.request.*
+import funlauncher.net.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Files
-import java.nio.file.Path
-import java.util.zip.ZipInputStream
-import kotlin.io.path.createDirectories
-import kotlin.io.path.deleteIfExists
-import kotlin.io.path.exists
-import kotlin.io.path.writeBytes
+import java.util.zip.ZipFile
 import kotlin.coroutines.coroutineContext
 
 class ModpackInstaller(
     private val buildManager: BuildManager,
-    private val modrinthApi: ModrinthApi,
-    private val pathManager: PathManager,
-    private val scope: CoroutineScope // Используем внешний scope
+    private val scope: CoroutineScope
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun install(modpackVersion: Version, onComplete: () -> Unit) {
-        scope.launch(Dispatchers.IO) { // Запускаем установку в переданном scope
-            val modpackFile = modpackVersion.files.firstOrNull { it.filename.endsWith(".mrpack") }
-                ?: throw IllegalArgumentException("Выбранная версия не является модпаком (.mrpack).")
-
-            val task = DownloadManager.startTask("Установка модпака: ${modpackVersion.name}", coroutineContext.job)
-
+    fun install(version: Version, onComplete: () -> Unit, onError: (String) -> Unit) {
+        scope.launch(Dispatchers.IO) {
+            val task = DownloadManager.startTask("Установка модпака: "+version.name, coroutineContext.job)
+            var staging: File? = null
             try {
-                // 1. Скачиваем .mrpack файл
-                DownloadManager.updateTask(task.id, 0.05f, "Скачивание архива...")
-                val tempMrpackFile = Files.createTempFile("modpack-", ".mrpack").toFile()
-                tempMrpackFile.deleteOnExit()
-                val modpackData = Network.client.get(modpackFile.url).body<ByteArray>()
-                tempMrpackFile.writeBytes(modpackData)
-
-                // 2. Распаковываем и читаем manifest
-                DownloadManager.updateTask(task.id, 0.1f, "Чтение манифеста...")
-                var manifest: ModrinthIndex? = null
-                val overridesDir = Files.createTempDirectory("modpack-overrides-").toFile()
-                overridesDir.deleteOnExit()
-
-                ZipInputStream(tempMrpackFile.inputStream()).use { zip ->
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        val entryName = entry.name
-                        if (entryName == "modrinth.index.json") {
-                            manifest = json.decodeFromString<ModrinthIndex>(zip.bufferedReader().readText())
-                        } else if (entryName.startsWith("overrides/")) {
-                            val destFile = File(overridesDir, entryName.removePrefix("overrides/"))
-                            if (entry.isDirectory) {
-                                destFile.mkdirs()
-                            } else {
-                                destFile.parentFile.mkdirs()
-                                destFile.outputStream().use { zip.copyTo(it) }
-                            }
-                        }
-                        entry = zip.nextEntry
-                    }
-                }
-
-                val modrinthIndex = manifest ?: throw IllegalStateException("modrinth.index.json не найден в архиве.")
-
-                // 3. Создаем новую сборку
-                DownloadManager.updateTask(task.id, 0.15f, "Создание сборки...")
-                val buildType = when {
-                    modrinthIndex.dependencies.quiltLoader != null -> BuildType.QUILT
-                    modrinthIndex.dependencies.neoforge != null -> BuildType.NEOFORGE
-                    modrinthIndex.dependencies.fabricLoader != null -> BuildType.FABRIC
-                    modrinthIndex.dependencies.forge != null -> BuildType.FORGE
-                    else -> BuildType.VANILLA
-                }
-                val mcVersion = modrinthIndex.dependencies.minecraft
-                val loaderVersion = modrinthIndex.dependencies.quiltLoader ?: modrinthIndex.dependencies.neoforge ?: modrinthIndex.dependencies.fabricLoader ?: modrinthIndex.dependencies.forge ?: ""
-                val buildVersionString = when(buildType) {
-                    BuildType.QUILT -> "$mcVersion-quilt-$loaderVersion"
-                    BuildType.NEOFORGE -> "$mcVersion-neoforge-$loaderVersion"
-                    BuildType.FABRIC -> "$mcVersion-fabric-$loaderVersion"
-                    BuildType.FORGE -> "$mcVersion-forge-$loaderVersion"
-                    else -> mcVersion
-                }
-
-                var buildName = modrinthIndex.name
-                var counter = 1
-                while (buildManager.loadBuilds().any { it.name.equals(buildName, ignoreCase = true) }) {
-                    buildName = "${modrinthIndex.name} ($counter)"
-                    counter++
-                }
-
-                val project = modrinthApi.getProject(modpackVersion.projectId)
-                val bannerGenerator = BannerGenerator(pathManager)
-                val bannerPath = project.iconUrl?.let {
-                    DownloadManager.updateTask(task.id, 0.18f, "Создание фона...")
-                    bannerGenerator.generateBanner(it, buildName)
-                }
-
-                buildManager.addBuild(buildName, buildVersionString, buildType, bannerPath)
-                val newBuild = buildManager.loadBuilds().first { it.name == buildName }
-
-                // 4. Копируем файлы из overrides
-                DownloadManager.updateTask(task.id, 0.2f, "Копирование конфигов...")
-                val buildPath = Path.of(newBuild.installPath)
-                overridesDir.copyRecursively(buildPath.toFile(), overwrite = true)
-
-                // 5. Скачиваем все моды, ресурспаки и т.д.
-                val totalFiles = modrinthIndex.files.size
-                coroutineScope {
-                    modrinthIndex.files.forEachIndexed { index, file ->
-                        launch {
-                            val progress = 0.2f + (index.toFloat() / totalFiles) * 0.8f
-                            DownloadManager.updateTask(task.id, progress, "Скачивание: ${file.path}")
-
-                            val destination = buildPath.resolve(file.path)
-                            destination.parent.createDirectories()
-
-                            try {
-                                val fileData = Network.client.get(file.downloads.first()).body<ByteArray>()
-                                if (fileData.isNotEmpty()) {
-                                    destination.writeBytes(fileData)
-                                } else {
-                                    println("Warning: Downloaded empty file for ${file.path}")
-                                }
-                            } catch (e: Exception) {
-                                println("Error downloading ${file.path}: ${e.message}")
+                val root = Files.createTempDirectory("materia-modpack-")
+                staging = root.toFile()
+                val archive = root.resolve("pack.mrpack")
+                val content = root.resolve("content")
+                Files.createDirectories(content)
+                val downloader = ModificationDownloader()
+                val file = version.files.firstOrNull { it.filename.endsWith(".mrpack") } ?: error("Нет файла .mrpack")
+                downloader.download(file, archive.toFile()) { progress, status -> DownloadManager.updateTask(task.id, progress * .1f, status) }
+                val manifest = ZipFile(archive.toFile()).use { zip ->
+                    val entry = zip.getEntry("modrinth.index.json") ?: error("Нет манифеста модпака")
+                    val index = zip.getInputStream(entry).bufferedReader().use { json.decodeFromString<ModrinthIndex>(it.readText()) }
+                    require(index.formatVersion == 1 && index.game == "minecraft") { "Неподдерживаемый формат модпака" }
+                    // Apply client overrides after common overrides, independently of archive order.
+                    for (prefix in listOf("overrides/", "client-overrides/")) {
+                        for (item in zip.entries().asSequence().filter { it.name.startsWith(prefix) }) {
+                            currentCoroutineContext().ensureActive()
+                            val relative = item.name.removePrefix(prefix)
+                            if (relative.isEmpty()) continue
+                            val target = ModificationDownloader.safeResolve(content, relative)
+                            if (item.isDirectory) Files.createDirectories(target) else {
+                                Files.createDirectories(target.parent)
+                                zip.getInputStream(item).use { input -> Files.newOutputStream(target).use { input.copyTo(it) } }
                             }
                         }
                     }
+                    index
                 }
-
-                DownloadManager.updateTask(task.id, 1.0f, "Установка завершена!")
+                val clientFiles = manifest.files.filter { it.env?.get("client") != "unsupported" }
+                for ((i, item) in clientFiles.withIndex()) {
+                    val destination = ModificationDownloader.safeResolve(content, item.path)
+                    require(item.downloads.isNotEmpty()) { "Нет URL файла: "+item.path }
+                    var failure: Exception? = null
+                    var success = false
+                    for (url in item.downloads) {
+                        try {
+                            downloader.downloadVerified(url, destination, item.fileSize, item.hashes)
+                            success = true
+                            break
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { failure = e }
+                    }
+                    if (!success) throw failure ?: IllegalStateException("Не удалось скачать файл")
+                    DownloadManager.updateTask(task.id, .1f + (i + 1f) / clientFiles.size * .8f, item.path)
+                }
+                val deps = manifest.dependencies
+                val (type, loader) = when {
+                    deps.quiltLoader != null -> BuildType.QUILT to deps.quiltLoader
+                    deps.neoforge != null -> BuildType.NEOFORGE to deps.neoforge
+                    deps.fabricLoader != null -> BuildType.FABRIC to deps.fabricLoader
+                    deps.forge != null -> BuildType.FORGE to deps.forge
+                    else -> BuildType.VANILLA to null
+                }
+                val buildVersion = if (loader == null) deps.minecraft else deps.minecraft+"-"+type.name.lowercase()+"-"+loader
+                require(manifest.name.isNotBlank() && manifest.name.trim() !in listOf(".", "..") && manifest.name.none { it in "/\\:*?\"<>|" }) { "Недопустимое имя сборки" }
+                var name = manifest.name.trim()
+                var suffix = 1
+                while (buildManager.loadBuilds().any { it.name.equals(name, true) }) name = manifest.name+" ("+(suffix++)+")"
+                currentCoroutineContext().ensureActive()
+                // Finish the short commit even if the screen is closed during it.
+                withContext(NonCancellable) {
+                    val target = buildManager.getBuildPath(name)
+                    require(!Files.exists(target)) { "Каталог сборки уже существует" }
+                    Files.createDirectories(target.parent)
+                    Files.move(content, target)
+                    try {
+                        buildManager.addBuild(name, buildVersion, type, null)
+                    } catch (e: Exception) {
+                        target.toFile().deleteRecursively()
+                        throw e
+                    }
+                }
+                withContext(Dispatchers.Main) { onComplete() }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                e.printStackTrace()
-                DownloadManager.updateTask(task.id, 1.0f, "Ошибка: ${e.message}")
-                // Убрана строка "throw e", которая приводила к крэшу
+                withContext(Dispatchers.Main) { onError("Ошибка установки модпака: "+e.message) }
             } finally {
-                withContext(Dispatchers.Main) {
-                    onComplete() // Вызываем callback в основном потоке
-                }
+                staging?.deleteRecursively()
+                DownloadManager.removeTask(task.id)
             }
         }
     }

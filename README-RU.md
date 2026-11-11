@@ -37,10 +37,10 @@
 
 ## 🛠 Стек технологий
 
-- **Язык**: [Kotlin](https://kotlinlang.org/) 2.3.0
+- **Язык**: [Kotlin](https://kotlinlang.org/) 2.4.21
 - **Java**: Java 25 (LTS)
 - **UI Framework**: [Compose Multiplatform](https://www.jetbrains.com/lp/compose-multiplatform/)
-- **Сборка**: Gradle 9.2.1
+- **Сборка**: Gradle 9.9.0
 - **Дизайн**: Material Design 3
 
 ---

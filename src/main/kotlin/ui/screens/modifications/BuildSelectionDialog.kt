@@ -8,7 +8,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -84,7 +86,8 @@ fun BuildSelectionCard(
     build: MinecraftBuild,
     onClick: () -> Unit
 ) {
-    val painter = ImageLoader.rememberImagePainter(build.imagePath)
+    var coverSize by remember { mutableStateOf(IntSize.Zero) }
+    val painter = ImageLoader.rememberImagePainter(build.imagePath, coverSize)
 
     Card(
         onClick = onClick,
@@ -93,7 +96,7 @@ fun BuildSelectionCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.fillMaxWidth().aspectRatio(16 / 9f)) {
+            Box(modifier = Modifier.fillMaxWidth().aspectRatio(16 / 9f).onSizeChanged { coverSize = it }) {
                 if (painter != null) {
                     Image(
                         painter = painter,

@@ -90,11 +90,12 @@ class JavaDownloader(
 
                 try {
                     log("Скачивание с ${bundle.download_url} в ${archivePath.absolutePathString()}")
-                    downloadFile(bundle.download_url!!, archivePath) { progress, status -> // URL не будет null
+                    downloadFile(bundle.download_url!!, archivePath, task.transferMeter) { progress, status -> // URL не будет null
                         DownloadManager.updateTask(task.id, progress, status)
                     }
 
                     DownloadManager.updateTask(task.id, 0.9f, "Распаковка...")
+                    task.transferMeter.beginPhase(emptyMap(), estimateAvailable = false)
                     log("Распаковка ${archivePath.fileName} в ${tempUnpackDir.absolutePathString()}")
                     if (destDir.exists()) destDir.toFile().deleteRecursively()
                     if (tempUnpackDir.exists()) tempUnpackDir.toFile().deleteRecursively()
@@ -193,7 +194,7 @@ class JavaDownloader(
         return latestBundle
     }
 
-    private suspend fun downloadFile(url: String, path: Path, onProgress: (Float, String) -> Unit) {
+    private suspend fun downloadFile(url: String, path: Path, meter: TransferMeter, onProgress: (Float, String) -> Unit) {
         client.prepareGet(url).execute { httpResponse ->
             if (httpResponse.status.value == 520) {
                 throw Exception("Ошибка 520: Веб-сервер вернул неизвестную ошибку. Возможно, CDN не может связаться с сервером Azul.")
@@ -204,6 +205,7 @@ class JavaDownloader(
 
             val channel: ByteReadChannel = httpResponse.body()
             val totalBytes = httpResponse.headers[HttpHeaders.ContentLength]?.toLongOrNull() ?: 0L
+            meter.beginPhase(mapOf(path.toString() to totalBytes.takeIf { it > 0 }))
             var bytesRead = 0L
 
             FileOutputStream(path.toFile()).use { output ->
@@ -213,6 +215,7 @@ class JavaDownloader(
                     if (read <= 0) break
                     output.write(buffer, 0, read)
                     bytesRead += read
+                    meter.received(path.toString(), read.toLong())
 
                     if (totalBytes > 0) {
                         val progress = 0.1f + (bytesRead.toFloat() / totalBytes.toFloat()) * 0.8f

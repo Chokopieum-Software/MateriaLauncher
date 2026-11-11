@@ -1,6 +1,7 @@
 package ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.geometry.Rect
 import funlauncher.managers.PathManager
 import state.AppState
 import ui.dialogs.*
@@ -11,6 +12,7 @@ import ui.widgets.GameConsole
 
 @Composable
 fun AppOverlays(
+    createButtonBounds: Rect? = null,
     viewModel: AppViewModel,
     appState: AppState,
     pathManager: PathManager
@@ -26,6 +28,7 @@ fun AppOverlays(
 
     if (viewModel.showAddBuildDialog) {
         AddBuildDialog(
+            sourceBounds = createButtonBounds,
             pathManager = pathManager,
             onDismiss = { viewModel.showAddBuildDialog = false },
             onAdd = { name, version, type, imagePath ->
@@ -54,6 +57,7 @@ fun AppOverlays(
     viewModel.showRamWarningDialog?.let { build ->
         RamWarningDialog(
             build = build,
+            message = viewModel.ramWarningMessage,
             onDismiss = {
                 viewModel.showRamWarningDialog = null
                 viewModel.isLaunchingBuildId = null

@@ -3,6 +3,8 @@ package ui.widgets
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.res.loadSvgPainter
@@ -18,6 +20,9 @@ import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 object ImageLoader {
+    private val coverCache = object : LinkedHashMap<String, Painter>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Painter>?) = size > 64
+    }
     private val inMemoryCache = ConcurrentHashMap<String, Painter>()
     private lateinit var cacheManager: CacheManager
 
@@ -43,32 +48,31 @@ object ImageLoader {
     }
 
     @Composable
-    fun rememberImagePainter(filePath: String?): Painter? {
-        var painter by remember(filePath) { mutableStateOf<Painter?>(null) }
+    fun rememberImagePainter(filePath: String?, targetSize: IntSize): Painter? {
+        var painter by remember(filePath, targetSize) { mutableStateOf<Painter?>(null) }
         val density = LocalDensity.current
 
-        LaunchedEffect(filePath) {
-            if (filePath == null) {
+        LaunchedEffect(filePath, targetSize, density.density) {
+            if (filePath == null || targetSize.width <= 0 || targetSize.height <= 0) {
                 painter = null
-                return@LaunchedEffect
-            }
-
-            if (inMemoryCache.containsKey(filePath)) {
-                painter = inMemoryCache[filePath]
                 return@LaunchedEffect
             }
 
             painter = withContext(Dispatchers.IO) {
                 val file = File(filePath)
+                val key = "$filePath:${file.lastModified()}:${file.length()}:${targetSize.width}x${targetSize.height}:${density.density}"
+                synchronized(coverCache) { coverCache[key] }?.let { return@withContext it }
                 if (file.exists()) {
                     try {
                         file.inputStream().use { stream ->
                             if (filePath.endsWith(".svg", ignoreCase = true)) {
                                 loadSvgPainter(stream, density)
                             } else {
-                                BitmapPainter(loadImageBitmap(stream))
+                                val thumbnail = decodeCoverThumbnail(file, targetSize.width, targetSize.height)
+                                try { BitmapPainter(thumbnail.toComposeImageBitmap()) }
+                                finally { thumbnail.flush() }
                             }.also {
-                                inMemoryCache[filePath] = it
+                                synchronized(coverCache) { coverCache[key] = it }
                             }
                         }
                     } catch (e: Exception) {

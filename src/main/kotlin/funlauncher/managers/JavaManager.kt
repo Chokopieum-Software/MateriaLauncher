@@ -10,6 +10,8 @@ package funlauncher.managers
 
 import funlauncher.JavaInfo
 import funlauncher.JavaInstallations
+import funlauncher.BuildType
+import funlauncher.MinecraftBuild
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -20,8 +22,21 @@ import kotlin.io.path.div
 class JavaManager(pathManager: PathManager) {
     private val jdksDir = pathManager.getAppDataDirectory().resolve("jdks").toFile()
 
+    fun selectJava(minecraftVersion: String, installations: List<JavaInfo>): JavaInfo? =
+        installations.firstOrNull { it.version == getRecommendedJavaVersion(minecraftVersion) && it.is64Bit }
+
+    fun requiresJava8(build: MinecraftBuild): Boolean =
+        build.type == BuildType.FORGE && getRecommendedJavaVersion(build.version) == 8 &&
+            (build.version.substringBefore('-').split('.').getOrNull(1)?.toIntOrNull() ?: Int.MAX_VALUE) <= 12
+
+    fun validateJavaForBuild(build: MinecraftBuild, java: JavaInfo) {
+        require(!requiresJava8(build) || java.version == 8) {
+            "Forge ${build.version.substringBefore('-')} требует Java 8. Выбрана Java ${java.version}. Выберите Java 8 или включите автоматический выбор Java в настройках сборки."
+        }
+    }
+
     fun getRecommendedJavaVersion(minecraftVersion: String): Int {
-        val parts = minecraftVersion.split('.')
+        val parts = minecraftVersion.substringBefore('-').split('.')
         val majorVersion = if (minecraftVersion.startsWith("1.")) {
             parts.getOrNull(1)?.toIntOrNull() ?: 0
         } else {
@@ -30,8 +45,9 @@ class JavaManager(pathManager: PathManager) {
 
         return when {
             majorVersion >= 26 -> 25
-            majorVersion >= 21 -> 21
+            majorVersion >= 21 || (majorVersion == 20 && (parts.getOrNull(2)?.toIntOrNull() ?: 0) >= 5) -> 21
             majorVersion >= 18 -> 17
+            majorVersion == 17 -> 16
             else -> 8
         }
     }

@@ -36,13 +36,14 @@ fun ConfirmDeleteDialog(
 @Composable
 fun RamWarningDialog(
     build: MinecraftBuild,
+    message: String,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Предупреждение") },
-        text = { Text("Вы выделили больше ОЗУ, чем доступно в системе. Это может привести к проблемам с производительностью или запуском. Продолжить?") },
+        title = { Text("Возможная нехватка памяти") },
+        text = { Text(message) },
         confirmButton = {
             Button(onClick = onConfirm) { Text("Все равно запустить") }
         },

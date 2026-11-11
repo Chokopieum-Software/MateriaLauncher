@@ -29,7 +29,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,6 +49,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import funlauncher.BuildType
 import funlauncher.MinecraftBuild
 import kotlinx.coroutines.delay
@@ -58,11 +59,14 @@ import org.chokopieum.software.materia_launcher.generated.resources.Res
 import org.chokopieum.software.materia_launcher.generated.resources.monocraft
 import org.jetbrains.compose.resources.Font
 import org.jetbrains.jewel.window.TitleBarScope
+import org.jetbrains.jewel.window.utils.clientRegion
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import ui.viewmodel.HomeViewModel
 import ui.widgets.AvatarImage
 import ui.widgets.ImageLoader
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import ui.widgets.SquircleShape
 import funlauncher.Theme
 
@@ -86,7 +90,7 @@ fun HomeScreen(
             containerColor = Color.Transparent
         ) { paddingValues ->
             AnimatedVisibility(
-                visible = expandedBuild == null,
+                visible = true,
                 modifier = Modifier.padding(paddingValues),
                 exit = fadeOut(animationSpec = tween(durationMillis = 200))
             ) {
@@ -154,17 +158,24 @@ fun HomeScreen(
             }
         }
 
-        AnimatedVisibility(
-            visible = expandedBuild != null,
-            enter = fadeIn(animationSpec = tween(300)),
-            exit = fadeOut(animationSpec = tween(300))
-        ) {
-            expandedBuild?.let { build ->
-                ExpandedBuildScreenWrapper(
-                    build = build,
-                    viewModel = viewModel,
-                    onDismiss = { expandedBuild = null }
-                )
+        expandedBuild?.let { build ->
+            Dialog(
+                onDismissRequest = { expandedBuild = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Surface(
+                    modifier = Modifier.padding(24.dp).widthIn(max = 1000.dp)
+                        .fillMaxWidth().heightIn(max = 760.dp).fillMaxHeight(),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.background,
+                    shadowElevation = 16.dp
+                ) {
+                    ExpandedBuildScreenWrapper(
+                        build = build,
+                        viewModel = viewModel,
+                        onDismiss = { expandedBuild = null }
+                    )
+                }
             }
         }
     }
@@ -176,41 +187,19 @@ fun ExpandedBuildScreenWrapper(
     viewModel: HomeViewModel,
     onDismiss: () -> Unit
 ) {
-    val painter = ImageLoader.rememberImagePainter(build.imagePath)
-
     Box(modifier = Modifier.fillMaxSize()) {
-        // Фоновое изображение сборки
-        if (painter != null) {
-            Image(
-                painter = painter,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Box(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(listOf(Color(0xFF606060), Color(0xFF303030)))
-                )
-            )
-        }
-
-        // Полупрозрачный слой для читаемости настроек
-        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)))
-
         Column(Modifier.fillMaxSize()) {
-            // Кнопка Назад и заголовок (TopBar)
+            // Заголовок и действия окна настроек.
             Row(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    Icon(Icons.Default.Close, contentDescription = "Закрыть настройки сборки")
                 }
                 Spacer(Modifier.width(16.dp))
-                Text(build.name, style = MaterialTheme.typography.headlineMedium)
-                
-                Spacer(Modifier.weight(1f))
+                Text(build.name, style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 
                 // Кнопка удаления сборки (перенесена из карточки)
                 var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -273,11 +262,11 @@ fun ExpandedBuildScreenWrapper(
 
 @Composable
 fun TitleBarScope.TitleBarActions(
-    viewModel: HomeViewModel
+    viewModel: HomeViewModel,
+    theme: Theme = viewModel.globalSettings.theme
 ) {
-    val isSystemDark = isSystemInDarkTheme()
-    val isDark = when(viewModel.globalSettings.theme) {
-        Theme.System -> isSystemDark
+    val isDark = when(theme) {
+        Theme.System -> ui.theme.rememberSystemDarkTheme()
         Theme.Light -> false
         Theme.Dark -> true
     }
@@ -293,6 +282,7 @@ fun TitleBarScope.TitleBarActions(
                 .padding(horizontal = 8.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(backgroundColor)
+                .clientRegion("account-selector")
                 .clickable { showAccountPopup = true }
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -437,7 +427,8 @@ private fun BuildCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
-    val painter = ImageLoader.rememberImagePainter(build.imagePath)
+    var coverSize by remember { mutableStateOf(IntSize.Zero) }
+    val painter = ImageLoader.rememberImagePainter(build.imagePath, coverSize)
 
     val borderColor by animateColorAsState(
         targetValue = if (isHovered) MaterialTheme.colorScheme.primary else Color.Transparent,
@@ -458,7 +449,7 @@ private fun BuildCard(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Image section
-            Box(modifier = Modifier.fillMaxWidth().aspectRatio(16 / 9f)) {
+            Box(modifier = Modifier.fillMaxWidth().aspectRatio(16 / 9f).onSizeChanged { coverSize = it }) {
                 if (painter != null) {
                     Image(
                         painter = painter,

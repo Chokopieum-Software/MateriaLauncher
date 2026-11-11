@@ -11,7 +11,7 @@
     *   macOS
     *   Linux
 *   **Java**:
-    *   Установленная или портативная версия Java 21 или выше.
+    *   JBRSDK 25 — полный JDK с javac, jlink и jpackage. Переменная JAVA_HOME должна указывать на каталог JDK.
 *   **Свободное место**:
     *   Минимум 2 ГБ свободного места на диске для загрузки библиотек и зависимостей.
 
@@ -42,4 +42,15 @@ gradlew.bat packageDistributable
 ./gradlew packageDistributable
 ```
 
-После успешного выполнения команды вы найдете готовые для запуска дистрибутивы в каталоге `build/distributable/`.
+После успешного выполнения команды вы найдете готовые для запуска дистрибутивы в каталоге `build/compose/binaries/main/app/`.
+
+## JBRSDK и IntelliJ IDEA
+
+Используйте полный [JetBrains Runtime SDK 25](https://github.com/JetBrains/JetBrainsRuntime/releases), а не только runtime: для упаковки нужны `jmods`, `jlink` и `jpackage`.
+
+1. Распакуйте JBRSDK и задайте `JAVA_HOME` на каталог, содержащий `bin/java.exe`.
+2. В IntelliJ IDEA выберите этот каталог в Project Structure → SDKs и назначьте SDK проекту.
+3. В Settings → Build Tools → Gradle используйте Gradle Wrapper и этот JDK (либо `GRADLE_LOCAL_JAVA_HOME`, если путь записан в `.gradle/config.properties` как `java.home=...`).
+4. После изменения переменных окружения откройте новый терминал или перезапустите IDE.
+
+Проверка: `gradlew.bat --version`, затем `gradlew.bat build`. Упаковка каталога приложения: `gradlew.bat createDistributable`.

@@ -31,9 +31,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.akuleshov7.ktoml.Toml
 import funlauncher.AppSettings
@@ -57,7 +57,14 @@ import java.nio.file.StandardCopyOption
 import java.util.zip.ZipFile
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.deleteRecursively
-import kotlin.math.roundToInt
+import ui.widgets.RamSelector
+import ui.widgets.ImageLoader
+import ui.widgets.BuildSettingsWarnings
+import ui.widgets.buildSettingsWarnings
+import ui.widgets.BuildWarning
+import ui.widgets.WarningLevel
+import ui.widgets.LaunchOptionsFields
+import funlauncher.utils.validateLaunchOptions
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.graphics.Color // Added import
 
@@ -85,8 +92,6 @@ private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 data class ModInfo(val id: String, val name: String, val version: String, val icon: ImageBitmap?, val file: File, val isEnabled: Boolean)
 
 // -- Resource Packs --
-@Serializable private data class PackMcMeta(val pack: PackInfo)
-@Serializable private data class PackInfo(val description: String)
 data class ResourcePackInfo(val name: String, val icon: ImageBitmap?, val file: File, val isEnabled: Boolean)
 
 // -- Worlds --
@@ -112,30 +117,32 @@ private suspend fun parseModFile(modFile: File): ModInfo = withContext(Dispatche
                 }
             }
         }
-    } catch (e: Exception) { e.printStackTrace() }
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.printStackTrace() }
     return@withContext ModInfo(modFile.nameWithoutExtension.removeSuffix(".jar"), modFile.name, "N/A", null, modFile, isEnabled)
 }
 
-private suspend fun parseResourcePack(packFile: File): ResourcePackInfo = withContext(Dispatchers.IO) {
+internal suspend fun parseResourcePack(packFile: File): ResourcePackInfo = withContext(Dispatchers.IO) {
     val isEnabled = !packFile.name.endsWith(".disabled")
-    val actualFile = if (isEnabled) packFile else File(packFile.parent, packFile.name.removeSuffix(".disabled"))
-    var packName = actualFile.name.removeSuffix(".zip").removeSuffix(".disabled")
+    val actualFile = packFile
+    var packName = actualFile.name.removeSuffix(".disabled").removeSuffix(".zip")
     var icon: ImageBitmap? = null
 
     try {
         if (actualFile.isDirectory) {
             val metaFile = File(actualFile, "pack.mcmeta")
             val iconFile = File(actualFile, "pack.png")
-            if (metaFile.exists()) json.decodeFromString<PackMcMeta>(metaFile.readText()).pack.description.let { packName = it }
+            if (metaFile.exists()) json.decodeFromString<PackMcMeta>(metaFile.readText()).pack.description.toPackDescription().takeIf { it.isNotBlank() }?.let { packName = it }
             if (iconFile.exists()) icon = iconFile.readBytes().toImageBitmap()
         } else if (actualFile.isFile) {
             ZipFile(actualFile).use { zip ->
                 zip.getEntry("pack.mcmeta")?.let {
-                    json.decodeFromString<PackMcMeta>(zip.getInputStream(it).bufferedReader().readText()).pack.description.let { packName = it }
+                    json.decodeFromString<PackMcMeta>(zip.getInputStream(it).bufferedReader().readText()).pack.description.toPackDescription().takeIf { it.isNotBlank() }?.let { packName = it }
                 }
                 zip.getEntry("pack.png")?.let { icon = zip.readImage("pack.png") }
             }
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) { e.printStackTrace() }
     return@withContext ResourcePackInfo(packName, icon, packFile, isEnabled)
 }
@@ -147,7 +154,7 @@ private suspend fun parseWorld(worldDir: File): WorldInfo = withContext(Dispatch
         if (iconFile.exists()) {
             icon = iconFile.readBytes().toImageBitmap()
         }
-    } catch (e: Exception) { e.printStackTrace() }
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.printStackTrace() }
     // TODO: Read level name from level.dat NBT file
     return@withContext WorldInfo(worldDir.name, icon, worldDir)
 }
@@ -207,14 +214,66 @@ fun BuildSettingsScreenWithoutDialog(
     var selectedMcVersion by remember { mutableStateOf(initialMcVersion) }
     var selectedLoaderVersion by remember { mutableStateOf(initialLoaderVersion) }
     var selectedBuildType by remember { mutableStateOf(build.type) }
+    val visibleTabs = SettingsTab.entries.filter { tab ->
+        tab != SettingsTab.Mods || selectedBuildType != BuildType.VANILLA
+    }
+    LaunchedEffect(selectedBuildType) {
+        if (selectedTab !in visibleTabs) selectedTab = SettingsTab.Main
+    }
     var imagePath by remember { mutableStateOf(build.imagePath) }
-    var selectedJavaPath by remember { mutableStateOf(build.javaPath) }
-    var useGlobalRam by remember { mutableStateOf(build.maxRamMb == null) }
-    var useGlobalJavaArgs by remember { mutableStateOf(build.javaArgs == null) }
-    var useGlobalEnvVars by remember { mutableStateOf(build.envVars == null) }
-    var maxRam by remember { mutableStateOf(build.maxRamMb ?: globalSettings.maxRamMb) }
-    var javaArgs by remember { mutableStateOf(build.javaArgs ?: globalSettings.javaArgs) }
-    var envVars by remember { mutableStateOf(build.envVars ?: globalSettings.envVars) }
+    var selectedJavaPath by remember { mutableStateOf<String?>(build.javaPath ?: "") }
+    var maxRam by remember { mutableStateOf(build.maxRamMb ?: AppSettings().maxRamMb) }
+    var javaArgs by remember { mutableStateOf(build.javaArgs ?: "") }
+    var envVars by remember { mutableStateOf(build.envVars ?: "") }
+
+    val javaManager = remember(pathManager) { JavaManager(pathManager) }
+    val javaSelection = selectedJavaPath.orEmpty()
+    val javaCheck by produceState<Pair<String, JavaInfo?>>("" to null, javaSelection) {
+        value = javaSelection to if (javaSelection.isBlank()) null
+            else runCatching { javaManager.getJavaInfo(javaSelection) }.getOrNull()
+    }
+    val totalRamMb = remember {
+        ((ManagementFactory.getOperatingSystemMXBean() as com.sun.management.OperatingSystemMXBean).totalMemorySize / (1024 * 1024)).toInt()
+    }
+    val launchOptions = validateLaunchOptions(javaArgs, envVars, maxRam)
+    val warnings = buildSettingsWarnings(
+        build.name, buildName, initialMcVersion, selectedMcVersion,
+        maxRam, totalRamMb, selectedBuildType != BuildType.VANILLA,
+        javaCheck.second?.takeIf { javaCheck.first == javaSelection }?.version,
+        javaManager.getRecommendedJavaVersion(selectedMcVersion)
+    ) + launchOptions.risks.map { BuildWarning(WarningLevel.Red, it) }
+    var confirmHighRisk by remember { mutableStateOf(false) }
+    val saveSettings = {
+        val finalVersion = when (selectedBuildType) {
+            BuildType.FABRIC -> "$selectedMcVersion-fabric-$selectedLoaderVersion"
+            BuildType.FORGE -> "$selectedMcVersion-forge-$selectedLoaderVersion"
+            BuildType.QUILT -> "$selectedMcVersion-quilt-$selectedLoaderVersion"
+            BuildType.NEOFORGE -> "$selectedMcVersion-neoforge-$selectedLoaderVersion"
+            else -> selectedMcVersion
+        }
+        onSave(buildName, finalVersion, selectedBuildType, imagePath, selectedJavaPath, maxRam, javaArgs, envVars)
+    }
+    if (confirmHighRisk) {
+        AlertDialog(
+            onDismissRequest = { confirmHighRisk = false },
+            icon = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Подтверждение изменений с высоким риском") },
+            text = {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Обнаружены следующие риски:")
+                    warnings.filter { it.level == WarningLevel.Red }.forEach { Text("• ${it.message}") }
+                    Text("Сохранить настройки, несмотря на указанные риски?")
+                }
+            },
+            confirmButton = {
+                Button(onClick = { confirmHighRisk = false; saveSettings() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                    Text("Сохранить, несмотря на риски")
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmHighRisk = false }) { Text("Вернуться к настройкам") } }
+        )
+    }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -244,35 +303,46 @@ fun BuildSettingsScreenWithoutDialog(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = onDismiss) { Text("Отмена") }
-                    Button(onClick = {
-                        val finalVersion = when (selectedBuildType) {
-                            BuildType.FABRIC -> "$selectedMcVersion-fabric-$selectedLoaderVersion"
-                            BuildType.FORGE -> "$selectedMcVersion-forge-$selectedLoaderVersion"
-                            BuildType.QUILT -> "$selectedMcVersion-quilt-$selectedLoaderVersion"
-                            BuildType.NEOFORGE -> "$selectedMcVersion-neoforge-$selectedLoaderVersion"
-                            else -> selectedMcVersion
-                        }
-                        onSave(buildName, finalVersion, selectedBuildType, imagePath, selectedJavaPath, if (useGlobalRam) null else maxRam, if (useGlobalJavaArgs) null else javaArgs, if (useGlobalEnvVars) null else envVars)
+                    Button(enabled = javaCheck.first == javaSelection && launchOptions.valid &&
+                        (selectedBuildType == BuildType.VANILLA || selectedLoaderVersion.isNotBlank()), onClick = {
+                        if (warnings.any { it.level == WarningLevel.Red }) confirmHighRisk = true
+                        else saveSettings()
                     }) { Text("Сохранить") }
                 }
             }
         }
     ) { paddingValues ->
-        Column(Modifier.fillMaxSize().padding(paddingValues)) {
-            PrimaryTabRow(
-                selectedTabIndex = selectedTab.ordinal,
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+        Row(Modifier.fillMaxSize().padding(paddingValues)) {
+            Column(
+                modifier = Modifier.width(190.dp).fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                    .verticalScroll(rememberScrollState()).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                SettingsTab.entries.forEach { tab ->
-                    Tab(
+                visibleTabs.forEach { tab ->
+                    NavigationDrawerItem(
                         selected = selectedTab == tab,
                         onClick = { selectedTab = tab },
-                        text = { Text(getTabName(tab), fontSize = if (tab == SettingsTab.ResourcePacks) 12.sp else TextUnit.Unspecified) }
+                        label = { Text(getTabName(tab)) },
+                        icon = {
+                            Icon(
+                                imageVector = when (tab) {
+                                    SettingsTab.Main -> Icons.Default.Settings
+                                    SettingsTab.Mods -> Icons.Default.Extension
+                                    SettingsTab.Worlds -> Icons.Default.Public
+                                    SettingsTab.ResourcePacks -> Icons.Default.Texture
+                                },
+                                contentDescription = null
+                            )
+                        }
                     )
                 }
             }
+            VerticalDivider()
+            Box(Modifier.weight(1f).fillMaxHeight()) {
             when (selectedTab) {
                 SettingsTab.Main -> MainSettingsTab(
+                    warnings = warnings,
                     build = build,
                     globalSettings = globalSettings,
                     buildName = buildName, onBuildNameChange = { buildName = it },
@@ -281,9 +351,6 @@ fun BuildSettingsScreenWithoutDialog(
                     selectedBuildType = selectedBuildType, onSelectedBuildTypeChange = { selectedBuildType = it },
                     imagePath = imagePath, onImagePathChange = { imagePath = it },
                     selectedJavaPath = selectedJavaPath, onSelectedJavaPathChange = { selectedJavaPath = it },
-                    useGlobalRam = useGlobalRam, onUseGlobalRamChange = { useGlobalRam = it },
-                    useGlobalJavaArgs = useGlobalJavaArgs, onUseGlobalJavaArgsChange = { useGlobalJavaArgs = it },
-                    useGlobalEnvVars = useGlobalEnvVars, onUseGlobalEnvVarsChange = { useGlobalEnvVars = it },
                     maxRam = maxRam, onMaxRamChange = { maxRam = it },
                     javaArgs = javaArgs, onJavaArgsChange = { javaArgs = it },
                     envVars = envVars, onEnvVarsChange = { envVars = it },
@@ -292,6 +359,7 @@ fun BuildSettingsScreenWithoutDialog(
                 SettingsTab.Mods -> ModsTab(build = build)
                 SettingsTab.Worlds -> WorldsTab(build = build)
                 SettingsTab.ResourcePacks -> ResourcePacksTab(build = build)
+            }
             }
         }
     }
@@ -532,6 +600,7 @@ private fun DeleteButton(onClick: () -> Unit) {
 
 @Composable
 private fun MainSettingsTab(
+    warnings: List<BuildWarning>,
     build: MinecraftBuild, globalSettings: AppSettings,
     buildName: String, onBuildNameChange: (String) -> Unit,
     selectedMcVersion: String, onSelectedMcVersionChange: (String) -> Unit,
@@ -539,9 +608,6 @@ private fun MainSettingsTab(
     selectedBuildType: BuildType, onSelectedBuildTypeChange: (BuildType) -> Unit,
     imagePath: String?, onImagePathChange: (String?) -> Unit,
     selectedJavaPath: String?, onSelectedJavaPathChange: (String?) -> Unit,
-    useGlobalRam: Boolean, onUseGlobalRamChange: (Boolean) -> Unit,
-    useGlobalJavaArgs: Boolean, onUseGlobalJavaArgsChange: (Boolean) -> Unit,
-    useGlobalEnvVars: Boolean, onUseGlobalEnvVarsChange: (Boolean) -> Unit,
     maxRam: Int, onMaxRamChange: (Int) -> Unit,
     javaArgs: String, onJavaArgsChange: (String) -> Unit,
     envVars: String, onEnvVarsChange: (String) -> Unit,
@@ -562,35 +628,49 @@ private fun MainSettingsTab(
     var quiltLoaderVersions by remember { mutableStateOf<List<QuiltVersion>>(emptyList()) }
     var neoForgeVersions by remember { mutableStateOf<List<NeoForgeVersion>>(emptyList()) }
     var applicableNeoForgeVersions by remember { mutableStateOf<List<NeoForgeVersion>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoadingMc by remember { mutableStateOf(true) }
+    var isLoadingLoader by remember { mutableStateOf(false) }
+    var catalogsReady by remember { mutableStateOf(false) }
+    var catalogRevision by remember { mutableIntStateOf(0) }
+    var loaderRevision by remember { mutableIntStateOf(0) }
+    var loaderError by remember { mutableStateOf<String?>(null) }
 
     val totalSystemMemory = remember { (ManagementFactory.getOperatingSystemMXBean() as com.sun.management.OperatingSystemMXBean).totalMemorySize / (1024 * 1024) }
 
     val displayedMcVersions = remember(selectedBuildType, allMcVersions, fabricGameVersions, forgeVersions, quiltGameVersions, neoForgeVersions) {
         val releaseVersions = allMcVersions.filter { it.type == "release" }.map { it.id }
-        when (selectedBuildType) {
-            BuildType.FABRIC -> releaseVersions.filter { it in fabricGameVersions.map { gv -> gv.version }.toSet() }
-            BuildType.FORGE -> releaseVersions.filter { it in forgeVersions.map { fv -> fv.mcVersion }.toSet() }
-            BuildType.QUILT -> releaseVersions.filter { it in quiltGameVersions.map { gv -> gv.version }.toSet() }
-            BuildType.NEOFORGE -> releaseVersions.filter { it in neoForgeVersions.map { v -> v.mcVersion }.toSet() }
-            else -> releaseVersions
+        val supported = when (selectedBuildType) {
+            BuildType.FABRIC -> fabricGameVersions.mapTo(hashSetOf()) { it.version }
+            BuildType.FORGE -> forgeVersions.mapTo(hashSetOf()) { it.mcVersion }
+            BuildType.QUILT -> quiltGameVersions.mapTo(hashSetOf()) { it.version }
+            BuildType.NEOFORGE -> neoForgeVersions.mapTo(hashSetOf()) { it.mcVersion }
+            else -> null
         }
+        if (supported == null) releaseVersions else releaseVersions.filter { it in supported }
     }
 
-    fun refreshLoaderVersions() {
-        if (selectedMcVersion.isBlank()) return
-        scope.launch {
-            isLoading = true
+    LaunchedEffect(selectedMcVersion, selectedBuildType, loaderRevision,
+        if (selectedBuildType == BuildType.FORGE || selectedBuildType == BuildType.NEOFORGE) catalogsReady else true) {
+        loaderError = null
+        fabricLoaderVersions = emptyList()
+        quiltLoaderVersions = emptyList()
+        applicableForgeVersions = emptyList()
+        applicableNeoForgeVersions = emptyList()
+        isLoadingLoader = false
+        if (selectedMcVersion.isBlank() || selectedBuildType == BuildType.VANILLA) return@LaunchedEffect
+        if (!catalogsReady && (selectedBuildType == BuildType.FORGE || selectedBuildType == BuildType.NEOFORGE)) return@LaunchedEffect
+        isLoadingLoader = true
+        try {
             when (selectedBuildType) {
                 BuildType.FABRIC -> {
-                    fabricLoaderVersions = versionManager.getFabricLoaderVersions(selectedMcVersion)
-                    if (selectedLoaderVersion.isBlank() || fabricLoaderVersions.none { it.version == selectedLoaderVersion }) {
+                    fabricLoaderVersions = versionManager.getFabricLoaderVersions(selectedMcVersion, forceRefresh = loaderRevision > 0)
+                    if (selectedLoaderVersion.isBlank()) {
                         onSelectedLoaderVersionChange(fabricLoaderVersions.firstOrNull { it.stable }?.version ?: fabricLoaderVersions.firstOrNull()?.version ?: "")
                     }
                 }
                 BuildType.FORGE -> {
                     applicableForgeVersions = forgeVersions.filter { it.mcVersion == selectedMcVersion }
-                    if (selectedLoaderVersion.isBlank() || applicableForgeVersions.none { it.forgeVersion == selectedLoaderVersion }) {
+                    if (selectedLoaderVersion.isBlank()) {
                         val recommended = applicableForgeVersions.find { it.isRecommended }
                         val latest = applicableForgeVersions.find { it.isLatest }
                         onSelectedLoaderVersionChange(recommended?.forgeVersion ?: latest?.forgeVersion ?: applicableForgeVersions.firstOrNull()?.forgeVersion ?: "")
@@ -598,56 +678,62 @@ private fun MainSettingsTab(
                 }
                 BuildType.QUILT -> {
                     quiltLoaderVersions = versionManager.getQuiltLoaderVersions(selectedMcVersion)
-                    if (selectedLoaderVersion.isBlank() || quiltLoaderVersions.none { it.version == selectedLoaderVersion }) {
+                    if (selectedLoaderVersion.isBlank()) {
                         onSelectedLoaderVersionChange(quiltLoaderVersions.firstOrNull()?.version ?: "")
                     }
                 }
                 BuildType.NEOFORGE -> {
                     applicableNeoForgeVersions = neoForgeVersions.filter { it.mcVersion == selectedMcVersion }
-                    if (selectedLoaderVersion.isBlank() || applicableNeoForgeVersions.none { it.neoForgeVersion == selectedLoaderVersion }) {
+                    if (selectedLoaderVersion.isBlank()) {
                         onSelectedLoaderVersionChange(applicableNeoForgeVersions.firstOrNull()?.neoForgeVersion ?: "")
                     }
                 }
                 else -> {}
             }
-            isLoading = false
+            val empty = when (selectedBuildType) {
+                BuildType.FABRIC -> fabricLoaderVersions.isEmpty()
+                BuildType.FORGE -> applicableForgeVersions.isEmpty()
+                BuildType.QUILT -> quiltLoaderVersions.isEmpty()
+                BuildType.NEOFORGE -> applicableNeoForgeVersions.isEmpty()
+                else -> false
+            }
+            if (empty) loaderError = "Для этой версии Minecraft список загрузчиков пуст. Повторите загрузку или выберите другую версию игры."
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            loaderError = "Не удалось загрузить версии загрузчика. Проверьте подключение и нажмите обновление справа."
+        } finally {
+            isLoadingLoader = false
         }
     }
 
     LaunchedEffect(Unit) {
-        isLoading = true
         javaInstallations = javaManager.findJavaInstallations().let { it.launcher + it.system }
-        val mc = async { versionManager.getMinecraftVersions() }
-        val fabric = async { versionManager.getFabricGameVersions() }
-        val forge = async { versionManager.getForgeVersions() }
-        val quilt = async { versionManager.getQuiltGameVersions() }
-        val neoforge = async { versionManager.getNeoForgeVersions() }
-        allMcVersions = mc.await()
-        fabricGameVersions = fabric.await()
-        forgeVersions = forge.await()
-        quiltGameVersions = quilt.await()
-        neoForgeVersions = neoforge.await()
-        refreshLoaderVersions() // Initial loader version refresh
-        isLoading = false
     }
 
-    LaunchedEffect(selectedMcVersion, selectedBuildType) {
-        onSelectedLoaderVersionChange("") // Reset on change
-        refreshLoaderVersions()
-    }
-
-    LaunchedEffect(displayedMcVersions) {
-        if (displayedMcVersions.isNotEmpty() && !displayedMcVersions.contains(selectedMcVersion)) {
-            onSelectedMcVersionChange(displayedMcVersions.first())
+    LaunchedEffect(catalogRevision) {
+        isLoadingMc = true
+        catalogsReady = false
+        try {
+            val mc = async(Dispatchers.IO) { versionManager.getMinecraftVersions() }
+            val fabric = async(Dispatchers.IO) { versionManager.getFabricGameVersions() }
+            val forge = async(Dispatchers.IO) { versionManager.getForgeVersions() }
+            val quilt = async(Dispatchers.IO) { versionManager.getQuiltGameVersions() }
+            val neoforge = async(Dispatchers.IO) { versionManager.getNeoForgeVersions() }
+            allMcVersions = mc.await()
+            fabricGameVersions = fabric.await()
+            forgeVersions = forge.await()
+            quiltGameVersions = quilt.await()
+            neoForgeVersions = neoforge.await()
+        } finally {
+            catalogsReady = true
+            isLoadingMc = false
         }
     }
 
-    if (isLoading) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
-    } else {
+    run {
         Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            BuildSettingsWarnings(warnings)
             ImageSelectionGroup(
                 imagePath = imagePath,
                 onImagePathChange = { selectedFile ->
@@ -662,36 +748,38 @@ private fun MainSettingsTab(
             )
             OutlinedTextField(value = buildName, onValueChange = onBuildNameChange, label = { Text("Название установки") }, modifier = Modifier.fillMaxWidth())
             VersionSelectionGroup(
-                mcVersions = displayedMcVersions,
+                mcVersions = (listOf(selectedMcVersion).filter { it.isNotBlank() } + displayedMcVersions).distinct(),
                 fabricVersions = fabricLoaderVersions,
                 forgeVersions = applicableForgeVersions,
                 quiltVersions = quiltLoaderVersions,
                 neoForgeVersions = applicableNeoForgeVersions,
                 selectedMcVersion = selectedMcVersion,
-                onMcVersionSelected = onSelectedMcVersionChange,
+                onMcVersionSelected = { version ->
+                    if (version != selectedMcVersion) {
+                        onSelectedLoaderVersionChange("")
+                        onSelectedMcVersionChange(version)
+                    }
+                },
                 selectedLoaderVersion = selectedLoaderVersion,
                 onLoaderVersionSelected = onSelectedLoaderVersionChange,
                 buildType = selectedBuildType,
-                onBuildTypeSelected = onSelectedBuildTypeChange, // Corrected parameter name
-                isLoadingMc = isLoading,
-                isLoadingLoader = isLoading,
-                onRefreshMc = { /* No manual refresh needed here anymore */ },
-                onRefreshLoader = { refreshLoaderVersions() }
+                onBuildTypeSelected = { type ->
+                    if (type != selectedBuildType) {
+                        onSelectedLoaderVersionChange("")
+                        onSelectedBuildTypeChange(type)
+                    }
+                },
+                isLoadingMc = isLoadingMc,
+                isLoadingLoader = isLoadingLoader,
+                onRefreshMc = { catalogRevision++ },
+                onRefreshLoader = { loaderRevision++ }
             )
-            JavaSelectionGroup(javaInstallations, globalSettings.javaPath, selectedJavaPath, onSelectedJavaPathChange)
-            SettingGroup("Выделение ОЗУ", useGlobalRam, { onUseGlobalRamChange(it); if (it) onMaxRamChange(globalSettings.maxRamMb) }) {
-                if (useGlobalRam) {
-                    Text("Используется: ${globalSettings.maxRamMb} МБ (глобальная настройка)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp))
-                } else {
-                    RamSelector(maxRam, totalSystemMemory.toInt(), onMaxRamChange)
-                }
+            loaderError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            JavaSelectionGroup(javaInstallations, selectedJavaPath, onSelectedJavaPathChange)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                RamSelector(maxRam, totalSystemMemory.toInt(), onMaxRamChange, selectedMcVersion, selectedBuildType != BuildType.VANILLA)
             }
-            SettingGroup("Аргументы Java", useGlobalJavaArgs, { onUseGlobalJavaArgsChange(it); if (it) onJavaArgsChange(globalSettings.javaArgs) }) {
-                OutlinedTextField(javaArgs, onJavaArgsChange, Modifier.fillMaxWidth().height(100.dp), !useGlobalJavaArgs, label = { Text("Аргументы Java") })
-            }
-            SettingGroup("Переменные среды", useGlobalEnvVars, { onUseGlobalEnvVarsChange(it); if (it) onEnvVarsChange(globalSettings.envVars) }) {
-                OutlinedTextField(envVars, onEnvVarsChange, Modifier.fillMaxWidth().height(100.dp), !useGlobalEnvVars, label = { Text("Переменные среды (VAR=VAL)") })
-            }
+            LaunchOptionsFields(javaArgs, onJavaArgsChange, envVars, onEnvVarsChange, maxRam)
             Spacer(Modifier.height(0.dp))
         }
     }
@@ -700,6 +788,8 @@ private fun MainSettingsTab(
 @Composable
 private fun ImageSelectionGroup(imagePath: String?, onImagePathChange: (File) -> Unit) {
     var showFileDialog by remember { mutableStateOf(false) }
+    var previewSize by remember { mutableStateOf(IntSize.Zero) }
+    val painter = ImageLoader.rememberImagePainter(imagePath, previewSize)
     if (showFileDialog) {
         AwtWindow(create = { object : FileDialog(null as Frame?, "Выберите обложку", FileDialog.LOAD) {
             override fun setVisible(b: Boolean) {
@@ -712,9 +802,8 @@ private fun ImageSelectionGroup(imagePath: String?, onImagePathChange: (File) ->
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Обложка сборки", style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Box(modifier = Modifier.size(128.dp, 80.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                val image by remember(imagePath) { derivedStateOf { imagePath?.let { path -> File(path).takeIf { it.exists() }?.let { runCatching { it.readBytes().toImageBitmap() }.getOrNull() } } } }
-                if (image != null) Image(painter = BitmapPainter(image!!), contentDescription = "Превью обложки", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            Box(modifier = Modifier.size(128.dp, 80.dp).onSizeChanged { previewSize = it }.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                if (painter != null) Image(painter = painter, contentDescription = "Превью обложки", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 else Icon(Icons.Default.BrokenImage, contentDescription = "Нет изображения", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Button(onClick = { showFileDialog = true }) {
@@ -784,10 +873,10 @@ private fun VersionSelectionGroup(
 }
 
 @Composable
-private fun JavaSelectionGroup(javaInstallations: List<JavaInfo>, globalJavaPath: String, selectedPath: String?, onPathSelected: (String?) -> Unit) {
+private fun JavaSelectionGroup(javaInstallations: List<JavaInfo>, selectedPath: String?, onPathSelected: (String?) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Версия Java", style = MaterialTheme.typography.titleMedium)
-        JavaSelection(javaInstallations, globalJavaPath, selectedPath, onPathSelected)
+        JavaSelection(javaInstallations, selectedPath, onPathSelected)
     }
 }
 
@@ -830,50 +919,21 @@ private fun parseBuildVersion(version: String, type: BuildType): Pair<String, St
     return parts.getOrElse(0) { version } to parts.getOrElse(1) { "" }
 }
 
-@Composable
-private fun SettingGroup(title: String, useGlobal: Boolean, onUseGlobalChange: (Boolean) -> Unit, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Наследовать", style = MaterialTheme.typography.labelMedium)
-                Checkbox(useGlobal, onUseGlobalChange)
-            }
-        }
-        content()
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun JavaSelection(installedJavas: List<JavaInfo>, globalJavaPath: String, selectedPath: String?, onPathSelected: (String?) -> Unit) {
+private fun JavaSelection(installedJavas: List<JavaInfo>, selectedPath: String?, onPathSelected: (String?) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    val globalJavaName = if (globalJavaPath.isNotBlank()) installedJavas.find { it.path == globalJavaPath }?.displayName ?: "Путь не найден" else "Авто"
-    val inheritText = "Наследовать ($globalJavaName)"
     val automaticText = "Автоматически (Рекомендуется)"
     val currentDisplayName = when (selectedPath) {
-        null -> inheritText
-        "" -> automaticText
+        null, "" -> automaticText
         else -> installedJavas.find { it.path == selectedPath }?.displayName ?: "Путь не найден"
     }
     ExposedDropdownMenuBox(expanded, { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(currentDisplayName, {}, readOnly = true, label = { Text("Версия Java") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.fillMaxWidth().menuAnchor())
         ExposedDropdownMenu(expanded, { expanded = false }) {
-            DropdownMenuItem(text = { Text(inheritText) }, onClick = { onPathSelected(null); expanded = false })
             DropdownMenuItem(text = { Text(automaticText) }, onClick = { onPathSelected(""); expanded = false })
             HorizontalDivider()
             installedJavas.forEach { javaInfo -> DropdownMenuItem(text = { Text(javaInfo.displayName) }, onClick = { onPathSelected(javaInfo.path); expanded = false }) }
         }
-    }
-}
-
-@Composable
-private fun RamSelector(currentRam: Int, totalRam: Int, onRamChange: (Int) -> Unit) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("ОЗУ: $currentRam MB", modifier = Modifier.weight(1f))
-            OutlinedTextField(currentRam.toString(), { onRamChange(it.toIntOrNull() ?: 0) }, modifier = Modifier.width(100.dp), singleLine = true)
-        }
-        Slider(currentRam.toFloat(), { onRamChange(it.roundToInt()) }, valueRange = 1024f..totalRam.toFloat(), steps = (totalRam / 512) - 2, modifier = Modifier.fillMaxWidth())
     }
 }

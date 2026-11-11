@@ -51,17 +51,13 @@ fun FilterPanel(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        val isVersionSelectionEnabled = viewModel.selectedBuildForFilter == null
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
             tonalElevation = 2.dp,
-            enabled = isVersionSelectionEnabled,
             onClick = {
-                if (isVersionSelectionEnabled) {
-                    viewModel.showVersionSelectionDialog = true
-                }
+                viewModel.showVersionSelectionDialog = true
             }
         ) {
             Row(
@@ -71,12 +67,12 @@ fun FilterPanel(
                 Icon(
                     Icons.Default.List,
                     contentDescription = "Выбрать версии",
-                    tint = if (isVersionSelectionEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = if (viewModel.selectedVersions.isEmpty()) "Выбрать версии" else viewModel.selectedVersions.joinToString(),
-                    color = if (isVersionSelectionEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
@@ -168,9 +164,7 @@ fun FilterPanel(
 
         Row(
             modifier = Modifier.fillMaxWidth().clickable {
-                if (viewModel.selectedBuildForFilter == null) {
-                    viewModel.loadersExpanded = !viewModel.loadersExpanded
-                }
+                viewModel.loadersExpanded = !viewModel.loadersExpanded
             },
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -178,11 +172,10 @@ fun FilterPanel(
                 stringResource(Res.string.loaders),
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
-                color = if (viewModel.selectedBuildForFilter != null) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface
             )
             IconButton(
                 onClick = { viewModel.loadersExpanded = !viewModel.loadersExpanded },
-                enabled = viewModel.selectedBuildForFilter == null
             ) {
                 Icon(
                     imageVector = if (viewModel.loadersExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -192,7 +185,7 @@ fun FilterPanel(
         }
         Spacer(Modifier.height(8.dp))
 
-        AnimatedVisibility(visible = viewModel.loadersExpanded && viewModel.selectedBuildForFilter == null) {
+        AnimatedVisibility(visible = viewModel.loadersExpanded) {
             Column {
                 val loadersToDisplay = if (showAllLoadersList) viewModel.filteredLoaders else viewModel.filteredLoaders.take(7)
                 loadersToDisplay.forEach { loader ->

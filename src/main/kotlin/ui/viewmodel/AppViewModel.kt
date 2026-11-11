@@ -10,6 +10,7 @@ package ui.viewmodel
 
 import androidx.compose.runtime.*
 import com.sun.management.OperatingSystemMXBean
+import funlauncher.utils.launchMemoryWarning
 import funlauncher.*
 import funlauncher.auth.Account
 import funlauncher.auth.AccountManager
@@ -20,6 +21,8 @@ import funlauncher.managers.JavaManager
 import funlauncher.net.JavaDownloader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -39,7 +42,7 @@ class AppViewModel(
     val accountManager: AccountManager,
     val javaDownloader: JavaDownloader,
     val versionMetadataFetcher: VersionMetadataFetcher,
-    private val onSettingsChange: (AppSettings) -> Unit
+    private val onSettingsChange: suspend (AppSettings) -> Unit
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     val viewModelScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -63,6 +66,8 @@ class AppViewModel(
     var buildToDelete by mutableStateOf<MinecraftBuild?>(null)
     var showGameConsole by mutableStateOf(false)
     var showRamWarningDialog by mutableStateOf<MinecraftBuild?>(null)
+    var ramWarningMessage by mutableStateOf("")
+        private set
     var showCheckmark by mutableStateOf(false)
     var isLaunchingBuildId by mutableStateOf<String?>(null)
     var runningBuild by mutableStateOf<MinecraftBuild?>(null)
@@ -84,8 +89,39 @@ class AppViewModel(
             .launchIn(viewModelScope)
     }
 
+    val startupSettings = appState.settings
+    private var activeSettings = appState.settings
+    var settingsSaving by mutableStateOf(false)
+        private set
+    var settingsError by mutableStateOf<String?>(null)
+        private set
+    var settingsSaved by mutableStateOf(false)
+        private set
+    private var failedSettings: AppSettings? = null
+
+    fun retrySettingsSave() { failedSettings?.let(::onSettingsChanged) }
+
     fun onSettingsChanged(newSettings: AppSettings) {
-        onSettingsChange(newSettings)
+        if (settingsSaving) return
+        settingsSaving = true
+        settingsError = null
+        settingsSaved = false
+        viewModelScope.launch {
+            try {
+                onSettingsChange(newSettings)
+                activeSettings = newSettings
+                failedSettings = null
+                settingsSaved = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failedSettings = newSettings
+                settingsError = "Не удалось сохранить настройки. Проверьте доступ к папке приложения."
+                logger.error("Cannot save settings", e)
+            } finally {
+                settingsSaving = false
+            }
+        }
     }
 
     fun refreshBuilds() {
@@ -123,13 +159,13 @@ class AppViewModel(
 
     private suspend fun launchMinecraft(build: MinecraftBuild, javaPath: String, account: Account) {
         runCatching {
-            if (appState.settings.showConsoleOnLaunch) {
+            if (activeSettings.showConsoleOnLaunch) {
                 showGameConsole = true
             }
             val installer = MinecraftInstaller(build, buildManager)
-            val finalMaxRam = build.maxRamMb ?: appState.settings.maxRamMb
-            val finalJavaArgs = build.javaArgs ?: appState.settings.javaArgs
-            val finalEnvVars = build.envVars ?: appState.settings.envVars ?: ""
+            val finalMaxRam = build.maxRamMb ?: activeSettings.maxRamMb
+            val finalJavaArgs = build.javaArgs ?: activeSettings.javaArgs
+            val finalEnvVars = build.envVars ?: activeSettings.envVars
 
             withContext(Dispatchers.IO) {
                 val process = installer.launchGame(
@@ -159,6 +195,15 @@ class AppViewModel(
                 }
             }
         }.onFailure {
+            if (it is CancellationException) {
+                withContext(NonCancellable + Dispatchers.Main) {
+                    isLaunchingBuildId = null
+                    runningBuild = null
+                    daemonStatus = "STOPPED"
+                    showGameConsole = false
+                }
+                throw it
+            }
             logger.error("Error during launch", it)
             withContext(Dispatchers.Main) {
                 errorDialogMessage = it.message ?: "Неизвестная ошибка при запуске."
@@ -172,7 +217,7 @@ class AppViewModel(
     private fun performLaunch(build: MinecraftBuild) {
         isLaunchingBuildId = build.name
         viewModelScope.launch {
-            val useAutoJava = build.javaPath.isNullOrBlank() && appState.settings.javaPath.isBlank()
+            val useAutoJava = build.javaPath.isNullOrBlank()
             val account = currentAccount ?: run {
                 errorDialogMessage = "Сначала выберите аккаунт!"
                 isLaunchingBuildId = null
@@ -185,13 +230,7 @@ class AppViewModel(
                 val allJavas = installations.launcher + installations.system
 
                 // 1. Ищем точное совпадение
-                var suitableJava = allJavas.firstOrNull { it.version == recommendedVersion && it.is64Bit }
-
-                // 2. Если не нашли, ищем любую подходящую (новее или равную)
-                if (suitableJava == null) {
-                    suitableJava = allJavas.filter { it.version >= recommendedVersion && it.is64Bit }
-                                          .maxByOrNull { it.version }
-                }
+                val suitableJava = javaManager.selectJava(build.version, allJavas)
 
                 if (suitableJava != null) {
                     launchMinecraft(build, suitableJava.path, account)
@@ -209,7 +248,7 @@ class AppViewModel(
                     }
                 }
             } else {
-                val javaPath = build.javaPath ?: appState.settings.javaPath
+                val javaPath = build.javaPath ?: ""
                 launchMinecraft(build, javaPath, account)
             }
         }
@@ -230,11 +269,16 @@ class AppViewModel(
             return
         }
 
-        val osBean = ManagementFactory.getOperatingSystemMXBean() as OperatingSystemMXBean
-        val freeMemory = osBean.freeMemorySize / (1024 * 1024)
-        val allocatedRam = build.maxRamMb ?: appState.settings.maxRamMb
+        val warning = runCatching {
+            val osBean = ManagementFactory.getOperatingSystemMXBean() as? OperatingSystemMXBean
+            osBean?.let {
+                launchMemoryWarning(build.copy(maxRamMb = build.maxRamMb ?: activeSettings.maxRamMb),
+                    it.totalMemorySize / (1024 * 1024), it.freeMemorySize / (1024 * 1024))
+            }
+        }.getOrNull()
 
-        if (allocatedRam > freeMemory) {
+        if (warning != null) {
+            ramWarningMessage = warning
             showRamWarningDialog = build
         } else {
             performLaunch(build)

@@ -8,7 +8,7 @@
 
 package funlauncher.database.dao
 
-import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.v1.core.Table
 
 object Accounts : Table() {
     val id = integer("id").autoIncrement()

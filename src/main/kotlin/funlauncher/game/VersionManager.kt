@@ -12,6 +12,12 @@ import funlauncher.managers.PathManager
 import funlauncher.net.Network
 import io.ktor.client.call.*
 import io.ktor.client.request.*
+import io.ktor.client.plugins.timeout
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.io.path.createDirectories
+import kotlin.io.path.writeText
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -70,14 +76,33 @@ class VersionManager(pathManager: PathManager) {
         }
     }
 
-    suspend fun getFabricLoaderVersions(gameVersion: String): List<FabricVersion> {
+    suspend fun getFabricLoaderVersions(gameVersion: String, forceRefresh: Boolean = false): List<FabricVersion> = withContext(Dispatchers.IO) {
+        val safeVersion = gameVersion.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val cacheFile = cacheDir.resolve("fabric_loader_$safeVersion.json")
+        val cached = runCatching {
+            json.decodeFromString<List<FabricVersion>>(cacheFile.readText())
+        }.getOrNull()?.takeIf { it.isNotEmpty() }
+        if (!forceRefresh && cached != null &&
+            System.currentTimeMillis() - java.nio.file.Files.getLastModifiedTime(cacheFile).toMillis() < 60 * 60 * 1000) {
+            return@withContext cached
+        }
         val url = "https://meta.fabricmc.net/v2/versions/loader/$gameVersion"
         try {
-            val response = client.get(url).body<List<FabricLoaderApiResponse>>()
-            return response.map { FabricVersion(it.loader.version, it.loader.stable) }
+            val response = client.get(url) {
+                timeout { requestTimeoutMillis = 15000; connectTimeoutMillis = 5000 }
+            }
+            check(response.status.value in 200..299) { "Fabric HTTP ${response.status.value}" }
+            val versions = response.body<List<FabricLoaderApiResponse>>().map { FabricVersion(it.loader.version, it.loader.stable) }
+            if (versions.isNotEmpty()) runCatching {
+                cacheDir.createDirectories()
+                cacheFile.writeText(json.encodeToString(versions))
+            }.onFailure { log("Не удалось сохранить кэш Fabric: ${it.message}") }
+            versions
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             log("Ошибка при получении версий загрузчика Fabric для $gameVersion: ${e.message}")
-            return emptyList()
+            cached ?: throw e
         }
     }
 
@@ -156,6 +181,8 @@ class VersionManager(pathManager: PathManager) {
         try {
             val response = client.get(url).body<List<QuiltLoaderApiResponse>>()
             return response.map { QuiltVersion(it.loader.version) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             log("Ошибка при получении версий загрузчика Quilt для $gameVersion: ${e.message}")
             return emptyList()

@@ -16,6 +16,8 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.Canvas
 import org.jetbrains.skia.Color4f
 import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.FilterTileMode
+import org.jetbrains.skia.Gradient
 import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Shader
@@ -60,7 +62,12 @@ class BannerGenerator(private val pathManager: PathManager) {
             val paint = Paint().apply {
                 shader = Shader.makeLinearGradient(
                     0f, 0f, 0f, bannerHeight.toFloat(),
-                    intArrayOf(startColor.rgb, endColor.rgb)
+                    Gradient(
+                        Gradient.Colors(
+                            colors = arrayOf(Color4f(startColor.rgb), Color4f(endColor.rgb)),
+                            tileMode = FilterTileMode.CLAMP
+                        )
+                    )
                 )
             }
             canvas.drawPaint(paint)

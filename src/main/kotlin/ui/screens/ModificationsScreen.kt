@@ -19,15 +19,18 @@ import funlauncher.managers.BuildManager
 import funlauncher.managers.CacheManager
 import funlauncher.managers.PathManager
 import funlauncher.net.Version
-import funlauncher.utils.VersionMatcher
 import org.jetbrains.compose.resources.stringResource
 import org.chokopieum.software.materia_launcher.generated.resources.*
 import ui.screens.modifications.*
-import java.io.File
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import funlauncher.net.DownloadManager
 import funlauncher.net.ModificationDownloader
+import funlauncher.net.ModificationInstaller
+import funlauncher.modpack.ModpackInstaller
+import funlauncher.net.ModrinthApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.job
 import kotlin.coroutines.coroutineContext
 
@@ -43,7 +46,8 @@ fun ModificationsScreen(
     onModpackInstalled: () -> Unit,
     pathManager: PathManager,
     snackbarHostState: SnackbarHostState,
-    cacheManager: CacheManager
+    cacheManager: CacheManager,
+    installationScope: CoroutineScope
 ) {
     val scope = rememberCoroutineScope()
     
@@ -61,30 +65,38 @@ fun ModificationsScreen(
     }
     
     val modificationDownloader = remember { ModificationDownloader() }
+    val modpackInstaller = remember(buildManager, installationScope) { ModpackInstaller(buildManager, installationScope) }
+
+    var pendingVersion by remember { mutableStateOf<Version?>(null) }
+    var pendingType by remember { mutableStateOf(ModificationType.MODS) }
+    var worldBuild by remember { mutableStateOf<funlauncher.MinecraftBuild?>(null) }
+    var installing by remember { mutableStateOf(false) }
 
     val contentPaddingBottom by animateDpAsState(80.dp)
 
-    fun installVersion(version: Version, build: funlauncher.MinecraftBuild) {
-        scope.launch {
+    fun installVersion(version: Version, build: funlauncher.MinecraftBuild, type: ModificationType, world: String? = null) {
+        installationScope.launch {
+            // Installation owns its API client; leaving the catalog closes only the catalog client.
+            val installationApi = ModrinthApi(cacheManager)
             var taskId: String? = null
             try {
-                val fileToDownload = version.files.firstOrNull { it.primary } ?: version.files.first()
-                val destinationDir = File(build.installPath, viewModel.selectedType.installDir)
-                val destinationFile = File(destinationDir, fileToDownload.filename)
-                val task = DownloadManager.startTask("Скачивание ${version.name}", coroutineContext.job)
+                val task = DownloadManager.startTask(version.name, coroutineContext.job)
                 taskId = task.id
-
-                modificationDownloader.download(fileToDownload, destinationFile) { progress, status ->
+                ModificationInstaller(installationApi, modificationDownloader).install(version, build, type.installDir, world) { progress, status ->
                     DownloadManager.updateTask(task.id, progress, status)
                 }
                 DownloadManager.updateTask(task.id, 1f, "Завершено")
                 snackbarHostState.showSnackbar("Установлено в '${build.name}'")
                 delay(3000)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 snackbarHostState.showSnackbar("Ошибка установки: ${e.message}")
                 taskId?.let { DownloadManager.updateTask(it, 0f, "Ошибка: ${e.message}") }
                 delay(5000)
             } finally {
+                installationApi.close()
+                installing = false
                 taskId?.let { DownloadManager.removeTask(it) }
             }
         }
@@ -93,14 +105,6 @@ fun ModificationsScreen(
     // Эффекты для обновления фильтров и поиска
     LaunchedEffect(viewModel.selectedType, viewModel.allCategories.size, viewModel.allLoaders.size) {
         viewModel.filterCategoriesAndLoaders()
-    }
-
-    LaunchedEffect(viewModel.selectedBuildForFilter) {
-        viewModel.applyBuildFilter()
-        // Если выбрана сборка и мы были на вкладке модпаков, переключимся на моды
-        if (viewModel.selectedBuildForFilter != null && viewModel.selectedType == ModificationType.MODPACKS) {
-            viewModel.selectedType = ModificationType.MODS
-        }
     }
 
     LaunchedEffect(
@@ -113,17 +117,6 @@ fun ModificationsScreen(
         viewModel.search()
     }
 
-    if (viewModel.showBuildSelectionDialog) {
-        BuildSelectionDialog(
-            builds = viewModel.allBuilds,
-            onDismissRequest = { viewModel.showBuildSelectionDialog = false },
-            onBuildSelected = { build ->
-                viewModel.selectedBuildForFilter = build
-                viewModel.showBuildSelectionDialog = false
-            }
-        )
-    }
-
     if (viewModel.showVersionSelectionDialog) {
         VersionSelectionDialog(
             versions = viewModel.allVanillaVersions,
@@ -134,28 +127,64 @@ fun ModificationsScreen(
 
     if (viewModel.showInstallDialog) {
         VersionInstallDialog(
-            versions = viewModel.getFilteredVersionsForInstall().ifEmpty { viewModel.projectVersions },
+            versions = viewModel.projectVersions,
             onDismissRequest = { viewModel.showInstallDialog = false },
             onInstallClick = { version ->
                 viewModel.showInstallDialog = false
-                
-                val compatibleBuilds = viewModel.allBuilds.filter { build ->
-                    version.gameVersions.any { gameVersion -> VersionMatcher.isCompatible(build.version, gameVersion) } &&
-                            (version.loaders.isEmpty() || version.loaders.any { loader -> build.type.name.contains(loader, ignoreCase = true) })
+                if (viewModel.selectedType == ModificationType.MODPACKS) {
+                    installing = true
+                    modpackInstaller.install(version, onComplete = {
+                        installing = false
+                        onModpackInstalled()
+                    }, onError = { message ->
+                        installing = false
+                        installationScope.launch { snackbarHostState.showSnackbar(message) }
+                    })
+                } else {
+                    pendingType = viewModel.selectedType
+                    pendingVersion = version
                 }
-
-                val targetBuild = viewModel.selectedBuildForFilter?.let {
-                    if (compatibleBuilds.contains(it)) it else null
-                } ?: compatibleBuilds.firstOrNull()
-
-                if (targetBuild == null) {
-                    scope.launch {
-                        snackbarHostState.showSnackbar("Не найдено совместимых сборок для этой версии.")
-                    }
-                    return@VersionInstallDialog
-                }
-                installVersion(version, targetBuild)
             }
+        )
+    }
+    pendingVersion?.takeIf { worldBuild == null }?.let { version ->
+        InstallModificationDialog(
+            compatibleBuilds = viewModel.allBuilds.filter { ModificationInstaller.isCompatible(version, it, pendingType.installDir) },
+            onDismiss = { pendingVersion = null },
+            onInstall = { build ->
+                if (pendingType == ModificationType.DATAPACKS) {
+                    worldBuild = build
+                } else {
+                    pendingVersion = null
+                    installing = true
+                    installVersion(version, build, pendingType)
+                }
+            }
+        )
+    }
+
+    worldBuild?.let { build ->
+        val worlds = remember(build) { java.io.File(build.installPath, "saves").listFiles()?.filter { it.isDirectory && java.io.File(it, "level.dat").isFile } ?: emptyList() }
+        AlertDialog(
+            onDismissRequest = { worldBuild = null; pendingVersion = null },
+            title = { Text("Выберите мир") },
+            text = {
+                Column {
+                    if (worlds.isEmpty()) Text("В этой сборке нет сохранённых миров")
+                    worlds.forEach { world ->
+                        TextButton(onClick = {
+                            val version = pendingVersion
+                            pendingVersion = null
+                            worldBuild = null
+                            if (version != null) {
+                                installing = true
+                                installVersion(version, build, pendingType, world.name)
+                            }
+                        }) { Text(world.name) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { worldBuild = null; pendingVersion = null }) { Text("Отмена") } }
         )
     }
 
@@ -192,13 +221,6 @@ fun ModificationsScreen(
                         }
                     }
                 },
-                actions = {
-                    Button(onClick = { viewModel.showBuildSelectionDialog = true }) {
-                        Text(viewModel.selectedBuildForFilter?.name ?: "Выбрать сборку")
-                        Spacer(Modifier.width(8.dp))
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Выбрать сборку")
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
                 ),
@@ -216,24 +238,17 @@ fun ModificationsScreen(
 
                 // Основной контент
                 Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    Crossfade(targetState = viewModel.selectedProject) { project ->
+                    // A heavyweight WebView cannot follow Compose alpha transitions.
+                    // Keep one details instance when the project metadata is refreshed.
+                    val project = viewModel.selectedProject
+                    key(project?.id) {
                         if (project != null) {
                             ModificationDetails(
                                 project = project,
-                                isLoadingDetails = viewModel.isLoadingProjectDetails,
+                                isLoadingDetails = viewModel.isLoadingProjectDetails || installing,
+                                detailsError = viewModel.projectDetailsError,
                                 onInstallClick = {
-                                    val filteredVersions = viewModel.getFilteredVersionsForInstall()
-                                    
-                                    when {
-                                        // Если выбрана сборка и найдена ровно одна совместимая версия
-                                        viewModel.selectedBuildForFilter != null && filteredVersions.size == 1 -> {
-                                            installVersion(filteredVersions.first(), viewModel.selectedBuildForFilter!!)
-                                        }
-                                        // Во всех остальных случаях (не выбрана сборка, или найдено 0 или >1 версий) - показываем диалог
-                                        else -> {
-                                            viewModel.showInstallDialog = true
-                                        }
-                                    }
+                                    viewModel.showInstallDialog = true
                                 }
                             )
                         } else {
@@ -265,11 +280,7 @@ fun ModificationsScreen(
                         icon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.back)) },
                         label = { Text(stringResource(Res.string.back)) }
                     )
-                    val modificationTypes = if (viewModel.selectedBuildForFilter != null) {
-                        ModificationType.entries.filter { it != ModificationType.MODPACKS }
-                    } else {
-                        ModificationType.entries
-                    }
+                    val modificationTypes = ModificationType.entries
                     modificationTypes.forEach { type ->
                         NavigationBarItem(
                             selected = viewModel.selectedType == type,

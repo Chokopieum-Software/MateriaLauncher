@@ -32,11 +32,18 @@ class SettingsManager(pathManager: PathManager) {
     }
 
     suspend fun saveSettings(settings: AppSettings) = withContext(Dispatchers.IO) {
+        settingsPath.parent.createDirectories()
+        val temporary = java.nio.file.Files.createTempFile(settingsPath.parent, "settings-", ".tmp")
         try {
-            settingsPath.parent.createDirectories()
-            settingsPath.writeText(json.encodeToString(settings))
-        } catch (e: Exception) {
-            e.printStackTrace() // Для отладки
+            temporary.writeText(json.encodeToString(settings))
+            try {
+                java.nio.file.Files.move(temporary, settingsPath, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                java.nio.file.Files.move(temporary, settingsPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            java.nio.file.Files.deleteIfExists(temporary)
         }
     }
 }

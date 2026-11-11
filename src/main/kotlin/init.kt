@@ -37,7 +37,6 @@ import splash.createAndShowSplashScreen
 import state.AppState
 import state.Screen
 import ui.App
-import ui.AppTab
 import ui.screens.wizard.FirstRunWizard
 import ui.theme.AnimatedAppTheme
 import ui.viewmodel.AppViewModel
@@ -54,12 +53,13 @@ import javax.swing.SwingUtilities
 import kotlin.system.exitProcess
 import java.io.File
 import javax.swing.JOptionPane
-import androidx.compose.foundation.isSystemInDarkTheme
+import ui.theme.rememberSystemDarkTheme
 import androidx.compose.ui.graphics.Color
 import funlauncher.SettingsManager
 import funlauncher.Theme
 import org.jetbrains.jewel.ui.ComponentStyling
 import org.jetbrains.jewel.intui.window.decoratedWindow
+import ui.widgets.TitleBarDownloads
 import ui.screens.TitleBarActions
 import ui.viewmodel.HomeViewModel
 import androidx.compose.ui.window.WindowPlacement
@@ -80,6 +80,12 @@ private lateinit var globalVersionMetadataFetcher: VersionMetadataFetcher
 
 @OptIn(ExperimentalResourceApi::class)
 fun main(args: Array<String>) {
+    // WebView2 uses a heavyweight child HWND. Compose overlays must be native
+    // owned windows to appear above it (including their modal scrim).
+    if (System.getProperty("os.name").startsWith("Windows", true)) {
+        System.setProperty("compose.layers.type", "WINDOW")
+    }
+    if (funlauncher.auth.MicrosoftCallback.handleActivation(args)) return
     // Инициализируем сборщик логов при запуске приложения
     LogCollector.init()
 
@@ -239,7 +245,7 @@ private fun runApplication(isUiTest: Boolean) {
                 val isDarkTheme = when (wizardTheme) {
                     Theme.Light -> false
                     Theme.Dark -> true
-                    Theme.System -> false // Fallback
+                    Theme.System -> rememberSystemDarkTheme()
                 }
                 val themeDefinition = if (isDarkTheme) JewelTheme.darkThemeDefinition() else JewelTheme.lightThemeDefinition()
 
@@ -298,10 +304,8 @@ private fun runApplication(isUiTest: Boolean) {
                         javaDownloader = globalJavaDownloader,
                         versionMetadataFetcher = globalVersionMetadataFetcher,
                         onSettingsChange = { newSettings ->
-                            scope.launch {
-                                globalSettingsManager.saveSettings(newSettings)
-                                appState = appState?.copy(settings = newSettings)
-                            }
+                            globalSettingsManager.saveSettings(newSettings)
+                            appState = appState?.copy(settings = newSettings)
                         }
                     )
                 }
@@ -314,7 +318,7 @@ private fun runApplication(isUiTest: Boolean) {
                 val isDarkTheme = when (settings.theme) {
                     Theme.Light -> false
                     Theme.Dark -> true
-                    Theme.System -> isSystemInDarkTheme()
+                    Theme.System -> rememberSystemDarkTheme()
                 }
                 val themeDefinition = if (isDarkTheme) {
                     JewelTheme.darkThemeDefinition()
@@ -333,7 +337,7 @@ private fun runApplication(isUiTest: Boolean) {
                         title = "Materia",
                         visible = isContentReady,
                         icon = icon,
-                        state = rememberWindowState(placement = WindowPlacement.Maximized),
+                        state = rememberWindowState(width = 1280.dp, height = 720.dp, placement = WindowPlacement.Maximized),
                         onKeyEvent = {
                             if (it.isCtrlPressed && it.key == Key.Grave && it.type == KeyEventType.KeyDown) {
                                 LogCollector.saveLogsToDesktop()
@@ -343,12 +347,12 @@ private fun runApplication(isUiTest: Boolean) {
                             }
                         }
                     ) {
+                        SideEffect {
+                            window.minimumSize = java.awt.Dimension(1280, 720)
+                        }
                         TitleBar {
-                            if (viewModel.currentTab == AppTab.Home) {
-                                TitleBarActions(homeViewModel)
-                            } else {
-                                Text("Materia")
-                            }
+                            TitleBarActions(homeViewModel, settings.theme)
+                            TitleBarDownloads(viewModel, settings.theme)
                         }
                         AnimatedAppTheme(settings.theme) {
                             Box(modifier = Modifier.fillMaxSize()) {

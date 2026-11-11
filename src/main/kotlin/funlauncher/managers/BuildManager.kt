@@ -9,6 +9,8 @@
 package funlauncher.managers
 
 import funlauncher.BuildType
+import funlauncher.AppSettings
+import funlauncher.SettingsManager
 import funlauncher.MinecraftBuild
 import funlauncher.database.dao.BuildDao
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +22,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
-import java.io.InputStream
 import java.nio.file.Path
 import kotlin.io.path.*
 
@@ -75,40 +76,28 @@ class BuildManager(private val pathManager: PathManager) {
 
     suspend fun loadBuilds(): List<MinecraftBuild> = withContext(Dispatchers.IO) {
         buildsMutex.withLock {
-            return@withContext buildDao.getAll()
+            val builds = buildDao.getAll()
+            val globalSettings = SettingsManager(pathManager).loadSettings()
+            return@withContext builds.map { build ->
+                val independentBuild = snapshotSettings(build, globalSettings).copy(
+                    imagePath = DefaultBuildCovers.ensurePath(build.imagePath, backgroundsPath)
+                )
+                if (independentBuild != build) buildDao.update(independentBuild)
+                independentBuild
+            }
         }
     }
 
-    private fun prepareDefaultBackgrounds(): List<Path> {
-        if (!backgroundsPath.exists()) {
-            backgroundsPath.createDirectories()
-        }
-
-        val defaultBackgrounds = listOf("1.png", "2.png", "3.png")
-        val backgroundPaths = mutableListOf<Path>()
-
-        for (bgName in defaultBackgrounds) {
-            val destPath = backgroundsPath.resolve(bgName)
-            if (!destPath.exists()) {
-                try {
-                    val resourceStream: InputStream? = this::class.java.getResourceAsStream("/backgrounds/$bgName")
-                    if (resourceStream != null) {
-                        destPath.outputStream().use { resourceStream.copyTo(it) }
-                    } else {
-                        println("Не удалось найти ресурс: /backgrounds/$bgName")
-                    }
-                } catch (e: Exception) {
-                    println("Ошибка копирования фона $bgName: ${e.message}")
-                }
-            }
-            if (destPath.exists()) {
-                backgroundPaths.add(destPath)
-            }
-        }
-        return backgroundPaths
-    }
+    private fun snapshotSettings(build: MinecraftBuild, settings: AppSettings): MinecraftBuild = build.copy(
+        javaPath = build.javaPath ?: settings.javaPath,
+        maxRamMb = build.maxRamMb ?: settings.maxRamMb,
+        javaArgs = build.javaArgs ?: settings.javaArgs,
+        envVars = build.envVars ?: settings.envVars
+    )
 
     suspend fun synchronizeBuilds(): Pair<List<MinecraftBuild>, Int> = withContext(Dispatchers.IO) {
+        loadBuilds()
+        val initialSettings = SettingsManager(pathManager).loadSettings()
         var newBuildsCount = 0
         val resultingBuilds = buildsMutex.withLock {
             val currentBuilds = buildDao.getAll().toMutableList()
@@ -117,7 +106,6 @@ class BuildManager(private val pathManager: PathManager) {
                 return@withLock currentBuilds
             }
 
-            val defaultBackgrounds = prepareDefaultBackgrounds()
             val existingBuildNames = currentBuilds.map { it.name }.toSet()
             val directoryNames = instancesPath.listDirectoryEntries()
                 .filter { it.isDirectory() }
@@ -126,7 +114,7 @@ class BuildManager(private val pathManager: PathManager) {
             for (dirName in directoryNames) {
                 if (dirName !in existingBuildNames) {
                     val versionInfo = detectVersionFromInstance(instancesPath.resolve(dirName))
-                    val randomBackground = if (defaultBackgrounds.isNotEmpty()) defaultBackgrounds.random().toString() else null
+                    val randomBackground = DefaultBuildCovers.randomPath(backgroundsPath)
                     val newBuild = MinecraftBuild(
                         name = dirName,
                         version = versionInfo.first,
@@ -134,8 +122,9 @@ class BuildManager(private val pathManager: PathManager) {
                         installPath = instancesPath.resolve(dirName).toString(),
                         imagePath = randomBackground
                     )
-                    buildDao.add(newBuild)
-                    currentBuilds.add(newBuild)
+                    val independentBuild = snapshotSettings(newBuild, initialSettings)
+                    buildDao.add(independentBuild)
+                    currentBuilds.add(independentBuild)
                     newBuildsCount++
                     println("Найдена и добавлена новая сборка: $dirName (Версия: ${versionInfo.first}, Тип: ${versionInfo.second})")
                 }
@@ -170,6 +159,7 @@ class BuildManager(private val pathManager: PathManager) {
     }
 
     suspend fun addBuild(name: String, version: String, type: BuildType, imagePath: String?) = withContext(Dispatchers.IO) {
+        val initialSettings = SettingsManager(pathManager).loadSettings()
         buildsMutex.withLock {
             require(name.isNotBlank()) { "Название сборки не может быть пустым" }
             require(version.isNotBlank()) { "Версия не может быть пустой" }
@@ -191,11 +181,11 @@ class BuildManager(private val pathManager: PathManager) {
                 version = version,
                 type = type,
                 installPath = buildPath.toString(),
-                imagePath = imagePath,
-                javaPath = "", // Автоматический выбор по умолчанию
-                maxRamMb = null,
-                javaArgs = null,
-                envVars = null,
+                imagePath = imagePath ?: DefaultBuildCovers.randomPath(backgroundsPath),
+                javaPath = initialSettings.javaPath,
+                maxRamMb = initialSettings.maxRamMb,
+                javaArgs = initialSettings.javaArgs,
+                envVars = initialSettings.envVars,
                 sortOrder = maxSortOrder + 1
             )
 
@@ -256,10 +246,10 @@ class BuildManager(private val pathManager: PathManager) {
                 type = newType,
                 installPath = newInstallPath,
                 imagePath = newImagePath,
-                javaPath = newJavaPath,
-                maxRamMb = newMaxRam,
-                javaArgs = newJavaArgs,
-                envVars = newEnvVars
+                javaPath = newJavaPath ?: buildToUpdate.javaPath ?: "",
+                maxRamMb = newMaxRam ?: buildToUpdate.maxRamMb ?: AppSettings().maxRamMb,
+                javaArgs = newJavaArgs ?: buildToUpdate.javaArgs ?: "",
+                envVars = newEnvVars ?: buildToUpdate.envVars ?: ""
             )
             
             buildDao.update(oldName, updatedBuild)
@@ -296,7 +286,9 @@ class BuildManager(private val pathManager: PathManager) {
 
         buildToRemove.imagePath?.let {
             val imageFile = File(it)
-            if (imageFile.exists() && imageFile.isFile) {
+            val sharedCover = imageFile.toPath().toAbsolutePath().normalize()
+                .startsWith(backgroundsPath.resolve("cover").toAbsolutePath().normalize())
+            if (!sharedCover && imageFile.exists() && imageFile.isFile) {
                 imageFile.delete()
                 println("Deleted cover image: $it")
             }

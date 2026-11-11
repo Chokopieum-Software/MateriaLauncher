@@ -6,10 +6,10 @@ import java.util.*
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
-    kotlin("jvm") version "2.3.21"
-    kotlin("plugin.serialization") version "2.3.21"
-    kotlin("plugin.compose") version "2.3.21"
-    id("org.jetbrains.compose") version "1.10.3"
+    kotlin("jvm") version "2.4.21"
+    kotlin("plugin.serialization") version "2.4.21"
+    kotlin("plugin.compose") version "2.4.21"
+    id("org.jetbrains.compose") version "1.12.2"
 }
 
 val isTestBuild = project.hasProperty("testbuild")
@@ -55,45 +55,57 @@ version = appVersion
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":ui-components"))
     implementation(compose.desktop.currentOs)
-    implementation(compose.components.resources)
-    implementation(compose.materialIconsExtended)
-    implementation(compose.material3)
+    implementation("org.jetbrains.compose.components:components-resources:1.12.2")
+    implementation("org.jetbrains.compose.material:material-icons-extended:1.7.3")
+    implementation("org.jetbrains.compose.material3:material3:1.9.0")
 
     // Jewel for custom window decorations
-    implementation("org.jetbrains.jewel:jewel-foundation:0.37.0-262.4852.51")
-    implementation("org.jetbrains.jewel:jewel-int-ui-standalone:0.37.0-262.4852.51")
-    implementation("org.jetbrains.jewel:jewel-decorated-window:0.37.0-262.4852.51")
-    implementation("org.jetbrains.jewel:jewel-int-ui-decorated-window:0.37.0-262.4852.51")
+    implementation("org.jetbrains.jewel:jewel-foundation:0.42.0-263.7307.200")
+    implementation("org.jetbrains.jewel:jewel-int-ui-standalone:0.42.0-263.7307.200")
+    implementation("org.jetbrains.jewel:jewel-decorated-window:0.42.0-263.7307.200")
+    implementation("org.jetbrains.jewel:jewel-int-ui-decorated-window:0.42.0-263.7307.200")
 
-    implementation("org.jetbrains.compose.components:components-resources:1.10.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
-    implementation("com.microsoft.azure:msal4j:1.23.1")
-    implementation("com.github.javakeyring:java-keyring:1.0.3")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.google.code.gson:gson:2.10.1")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.11.0")
+    implementation("com.microsoft.azure:msal4j:1.26.0")
+    implementation("com.github.javakeyring:java-keyring:1.0.4")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    implementation("com.google.code.gson:gson:2.15.0")
     implementation("com.akuleshov7:ktoml-core-jvm:0.7.1")
-    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.39.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
-    implementation("io.ktor:ktor-client-core:2.3.13")
-    implementation("io.ktor:ktor-client-cio:2.3.13")
-    implementation("io.ktor:ktor-client-content-negotiation:2.3.13")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.13")
-    implementation("io.ktor:ktor-client-logging:2.3.13")
-    implementation("org.apache.commons:commons-compress:1.26.2")
-    implementation("org.apache.commons:commons-lang3:3.18.0")
-    implementation("sh.calvin.reorderable:reorderable:2.4.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.46.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-coil3:0.46.0")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
+    implementation("io.coil-kt.coil3:coil-svg:3.6.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
+    implementation("io.ktor:ktor-client-core:3.6.1")
+    implementation("io.ktor:ktor-client-cio:3.6.1")
+    implementation("io.ktor:ktor-client-content-negotiation:3.6.1")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.6.1")
+    implementation("io.ktor:ktor-client-logging:3.6.1")
+    implementation("org.apache.commons:commons-compress:1.28.0")
+    implementation("org.apache.commons:commons-lang3:3.21.0")
+    implementation("sh.calvin.reorderable:reorderable:3.1.0")
 
     // SLF4J
-    implementation("org.slf4j:slf4j-api:2.0.12")
-    implementation("org.slf4j:slf4j-simple:2.0.12")
+    implementation("org.slf4j:slf4j-api:2.0.20")
+    implementation("org.slf4j:slf4j-simple:2.0.20")
 
     // Exposed for SQLite
-    implementation("org.jetbrains.exposed:exposed-core:0.52.0")
-    implementation("org.jetbrains.exposed:exposed-dao:0.52.0")
-    implementation("org.jetbrains.exposed:exposed-jdbc:0.52.0")
-    implementation("org.xerial:sqlite-jdbc:3.46.0.0")
+    implementation("org.jetbrains.exposed:exposed-core:1.6.1")
+    implementation("org.jetbrains.exposed:exposed-dao:1.6.1")
+    implementation("org.jetbrains.exposed:exposed-jdbc:1.6.1")
+    implementation("org.xerial:sqlite-jdbc:3.54.1.0")
+    implementation("org.commonmark:commonmark:0.24.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.24.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.24.0")
+    implementation("org.commonmark:commonmark-ext-autolink:0.24.0")
+    implementation("org.jsoup:jsoup:1.21.2")
+    implementation("ca.weblite:webview:1.14.0")
+    implementation("net.java.dev.jna:jna-platform:5.18.1")
+    testImplementation(kotlin("test-junit"))
 }
 
 kotlin {
@@ -145,7 +157,35 @@ afterEvaluate {
     }
 }
 
+val coverFiles = fileTree("src/main/composeResources/drawable/cover") {
+    include("*.png", "*.jpg", "*.jpeg")
+}
+// Nested folders in drawable are not supported by the Compose accessor generator.
+// Package covers separately, leaving the requested source directory intact.
+val prepareUiResources by tasks.registering(Sync::class) {
+    from("src/main/composeResources") { exclude("drawable/cover/**") }
+    into(layout.buildDirectory.dir("generated/uiResources"))
+    includeEmptyDirs = false
+}
+compose.resources {
+    customDirectory("main", layout.dir(prepareUiResources.map { it.destinationDir }))
+}
+val generateCoverIndex by tasks.registering {
+    inputs.files(coverFiles)
+    val indexFile = layout.buildDirectory.file("generated/coverResources/covers/index.txt")
+    outputs.file(indexFile)
+    doLast {
+        indexFile.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(coverFiles.files.map { it.name }.sorted().joinToString("\n"))
+        }
+    }
+}
+
 tasks.named<Copy>("processResources") {
+    dependsOn(generateCoverIndex)
+    from(coverFiles) { into("covers") }
+    from(layout.buildDirectory.dir("generated/coverResources"))
     doLast {
         val props = Properties()
         props.setProperty("version", appVersion)
@@ -173,4 +213,9 @@ compose.resources {
     // Если нужно, чтобы ресурсы были видны в других модулях
     publicResClass = true
     generateResClass = always
+}
+
+// Allow regression checks against the same trimmed runtime used by IDEA Run.
+tasks.withType<Test>().configureEach {
+    providers.gradleProperty("testJavaExecutable").orNull?.let { executable = it }
 }

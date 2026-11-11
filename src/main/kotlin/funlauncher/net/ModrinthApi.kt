@@ -83,6 +83,10 @@ class ModrinthApi(private val cacheManager: CacheManager) {
         } ?: throw IllegalStateException("Failed to fetch project versions")
     }
 
+    suspend fun getVersion(id: String): Version = safeApiCall {
+        client.get("$MODRINTH_API_URL/version/$id").body()
+    }
+
     // --- RAW DATA METHODS ---
 
     suspend fun getCategories(): List<ModrinthCategoryTag> {

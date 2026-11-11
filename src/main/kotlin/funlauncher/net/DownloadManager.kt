@@ -14,6 +14,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import java.util.*
 
 /**
@@ -24,7 +26,9 @@ data class DownloadTask(
     val description: String,
     val job: Job,
     val progress: androidx.compose.runtime.State<Float> = mutableStateOf(0f),
-    val status: androidx.compose.runtime.State<String> = mutableStateOf("В очереди...")
+    val status: androidx.compose.runtime.State<String> = mutableStateOf("В очереди..."),
+    val transferMeter: TransferMeter = TransferMeter(),
+    val transferStats: androidx.compose.runtime.MutableState<TransferStats> = mutableStateOf(TransferStats())
 )
 
 /**
@@ -51,6 +55,10 @@ object DownloadManager {
         )
         scope.launch {
             tasks.add(task)
+            while (task in tasks && task.job.isActive) {
+                task.transferStats.value = task.transferMeter.snapshot()
+                delay(1000)
+            }
         }
         return task
     }
@@ -73,7 +81,7 @@ object DownloadManager {
     fun cancelTask(id: String) {
         scope.launch {
             tasks.find { it.id == id }?.let {
-                it.job.cancel()
+                it.job.cancelAndJoin()
                 tasks.remove(it)
             }
         }

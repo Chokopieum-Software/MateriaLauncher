@@ -10,9 +10,10 @@ package funlauncher.database.dao
 
 import funlauncher.BuildType
 import funlauncher.MinecraftBuild
-import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.v1.core.*
+import org.jetbrains.exposed.v1.jdbc.*
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 
 class BuildDao {
 
@@ -96,7 +97,7 @@ class BuildDao {
 
     fun exists(name: String): Boolean {
         return transaction {
-            Builds.select { Builds.name eq name }.count() > 0
+            Builds.selectAll().where { Builds.name eq name }.count() > 0
         }
     }
 

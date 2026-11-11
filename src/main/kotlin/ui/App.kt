@@ -11,7 +11,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -26,12 +25,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import funlauncher.managers.CacheManager
 import funlauncher.managers.PathManager
-import funlauncher.net.DownloadManager
 import kotlinx.coroutines.delay
 import org.chokopieum.software.materia_launcher.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
@@ -40,8 +42,6 @@ import ui.screens.*
 import ui.theme.AnimatedAppTheme
 import ui.viewmodel.AppViewModel
 import ui.viewmodel.HomeViewModel
-import ui.widgets.BeautifulCircularProgressIndicator
-import ui.widgets.DownloadsPopup
 
 // Перечисление для вкладок навигации в приложении.
 enum class AppTab { Home, Modifications, Settings }
@@ -64,16 +64,8 @@ fun App(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var createButtonBounds by remember { mutableStateOf<Rect?>(null) }
 
-
-    // Эффект для отображения "галочки" после завершения всех загрузок.
-    LaunchedEffect(DownloadManager.tasks.size) {
-        if (DownloadManager.tasks.isEmpty() && !viewModel.showCheckmark) {
-            viewModel.showCheckmark = true
-            delay(2000)
-            viewModel.showCheckmark = false
-        }
-    }
 
     // Основная тема и разметка приложения.
     AnimatedAppTheme(appState.settings.theme) {
@@ -95,10 +87,11 @@ fun App(
                                 buildManager = viewModel.buildManager,
                                 onModpackInstalled = {
                                     viewModel.refreshBuilds()
-                                    viewModel.currentTab = AppTab.Home
+                                    if (viewModel.currentTab == AppTab.Modifications) viewModel.currentTab = AppTab.Home
                                 },
                                 pathManager = pathManager,
                                 snackbarHostState = snackbarHostState,
+                                installationScope = viewModel.viewModelScope,
                                 cacheManager = cacheManager
                             )
                             AppTab.Settings -> SettingsTab(
@@ -107,8 +100,12 @@ fun App(
                                 onOpenJavaManager = { viewModel.showJavaManagerWindow = true },
                                 accountManager = viewModel.accountManager,
                                 coroutineScope = scope,
-                                versionMetadataFetcher = viewModel.versionMetadataFetcher,
-                                snackbarHostState = snackbarHostState
+                                cacheManager = cacheManager,
+                                startupSettings = viewModel.startupSettings,
+                                saving = viewModel.settingsSaving,
+                                saveError = viewModel.settingsError,
+                                saved = viewModel.settingsSaved,
+                                onRetrySave = viewModel::retrySettingsSave
                             )
                         }
                     }
@@ -117,13 +114,15 @@ fun App(
                 // Нижняя панель
                 BottomBar(
                     viewModel = viewModel,
-                    homeViewModel = homeViewModel
+                    homeViewModel = homeViewModel,
+                    onCreateButtonBounds = { createButtonBounds = it }
                 )
             }
         }
 
         // Компонент для отображения всех оверлеев (диалоги, всплывающие окна).
         AppOverlays(
+            createButtonBounds = createButtonBounds,
             viewModel = viewModel,
             appState = appState,
             pathManager = pathManager
@@ -134,7 +133,8 @@ fun App(
 @Composable
 private fun BoxScope.BottomBar(
     viewModel: AppViewModel,
-    homeViewModel: HomeViewModel
+    homeViewModel: HomeViewModel,
+    onCreateButtonBounds: (Rect) -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -170,16 +170,6 @@ private fun BoxScope.BottomBar(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Кнопка (FAB) для отображения статуса и списка загрузок.
-            Box {
-                DownloadsFab(
-                    show = DownloadManager.tasks.isNotEmpty() || viewModel.showCheckmark,
-                    showCheckmark = viewModel.showCheckmark,
-                    showPopup = viewModel.showDownloadsPopup,
-                    onTogglePopup = { viewModel.showDownloadsPopup = !viewModel.showDownloadsPopup }
-                )
-            }
-
             // Кнопка "Создать"
             AnimatedVisibility(
                 visible = viewModel.currentTab == AppTab.Home,
@@ -187,6 +177,8 @@ private fun BoxScope.BottomBar(
                 exit = fadeOut()
             ) {
                 ExtendedFloatingActionButton(
+                    modifier = Modifier.onGloballyPositioned { onCreateButtonBounds(it.boundsInWindow()) }
+                        .graphicsLayer { alpha = if (viewModel.showAddBuildDialog) 0f else 1f },
                     onClick = { homeViewModel.onAddBuildClick() },
                     icon = { Icon(Icons.Default.Add, contentDescription = "Добавить сборку") },
                     text = { Text("Создать") }
@@ -234,42 +226,6 @@ private fun AppNavigation(
                 icon = { Icon(Icons.Default.Settings, contentDescription = stringResource(Res.string.tab_settings)) },
                 label = { Text(stringResource(Res.string.tab_settings)) }
             )
-        }
-    }
-}
-
-@Composable
-private fun BoxScope.DownloadsFab(
-    show: Boolean,
-    showCheckmark: Boolean,
-    showPopup: Boolean,
-    onTogglePopup: () -> Unit
-) {
-    AnimatedVisibility(
-        visible = show,
-        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-    ) {
-        Box {
-            FloatingActionButton(
-                onClick = onTogglePopup,
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                when {
-                    showCheckmark -> Icon(Icons.Default.Check, contentDescription = "Загрузка завершена")
-                    DownloadManager.tasks.isNotEmpty() -> BeautifulCircularProgressIndicator(
-                        size = 24.dp,
-                        strokeWidth = 3.dp,
-                        primaryColor = MaterialTheme.colorScheme.primary,
-                        secondaryColor = MaterialTheme.colorScheme.tertiary
-                    )
-                    else -> Icon(Icons.Default.Download, contentDescription = "Загрузки")
-                }
-            }
-            if (showPopup) {
-                DownloadsPopup(onDismissRequest = onTogglePopup)
-            }
         }
     }
 }

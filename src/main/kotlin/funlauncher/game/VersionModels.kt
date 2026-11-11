@@ -73,16 +73,16 @@ data class VersionInfo(
     data class Downloads(val client: ClientDownload)
 
     @Serializable
-    data class ClientDownload(val url: String)
+    data class ClientDownload(val url: String, val size: Long = 0, val sha1: String? = null)
 
     @Serializable
     data class AssetIndexInfo(val id: String, val url: String)
 
     @Serializable
-    data class Rule(val action: String, val os: OS? = null)
+    data class Rule(val action: String, val os: OS? = null, val features: Map<String, Boolean> = emptyMap())
 
     @Serializable
-    data class OS(val name: String? = null)
+    data class OS(val name: String? = null, val arch: String? = null, val version: String? = null)
 }
 
 @Serializable
@@ -99,7 +99,8 @@ data class FabricProfile(
     val inheritsFrom: String? = null,
     val mainClass: String? = null,
     val libraries: List<VersionInfo.Library> = emptyList(),
-    val arguments: VersionInfo.Arguments? = null
+    val arguments: VersionInfo.Arguments? = null,
+    @SerialName("minecraftArguments") val gameArguments: String? = null
 )
 
 @Serializable
@@ -108,7 +109,8 @@ data class VersionProfile(
     val inheritsFrom: String,
     val mainClass: String,
     val libraries: List<VersionInfo.Library>,
-    val arguments: VersionInfo.Arguments? = null
+    val arguments: VersionInfo.Arguments? = null,
+    @SerialName("minecraftArguments") val gameArguments: String? = null
 )
 
 // --- UI-facing Models ---

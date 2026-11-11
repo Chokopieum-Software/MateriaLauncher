@@ -28,4 +28,16 @@ data class OfflineAccount(
     override val uuid: String,
     override val accessToken: String,
     override val isLicensed: Boolean = false
-) : Account()
+) : Account() {
+    companion object {
+        fun uuidFor(username: String): String = java.util.UUID.nameUUIDFromBytes(
+            "OfflinePlayer:$username".toByteArray(Charsets.UTF_8)
+        ).toString()
+
+        fun create(username: String): OfflineAccount {
+            val name = username.trim()
+            require(name.isNotEmpty() && name.length <= 50) { "Имя аккаунта должно содержать от 1 до 50 символов." }
+            return OfflineAccount(name, uuidFor(name), "0")
+        }
+    }
+}

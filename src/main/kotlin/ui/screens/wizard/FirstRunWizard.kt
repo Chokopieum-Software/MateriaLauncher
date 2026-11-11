@@ -22,6 +22,9 @@ import funlauncher.AppSettings
 import funlauncher.Theme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.chokopieum.software.ui.ProgressState
+import ui.widgets.MicrosoftLoginFeedback
 
 enum class WizardStep {
     WELCOME,
@@ -42,25 +45,30 @@ fun FirstRunWizard(
     var isAuthenticating by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     var authSuccess by remember { mutableStateOf(false) }
+    var authAttempt by remember { mutableStateOf(0) }
 
     val scope = rememberCoroutineScope()
 
     fun handleLogin() {
+        if (isAuthenticating) return
+        authAttempt++
         if (accountManager == null) {
             authSuccess = true
             return
         }
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             isAuthenticating = true
             authError = null
             authSuccess = false
             try {
-                val success = accountManager.loginWithMicrosoft()
+                val success = withContext(Dispatchers.IO) { accountManager.loginWithMicrosoft() }
                 if (success) {
                     authSuccess = true
                 } else {
                     authError = "Не удалось войти в аккаунт Microsoft."
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 authError = "Критическая ошибка: ${e.message}"
             } finally {
@@ -143,17 +151,23 @@ fun FirstRunWizard(
                                         Text("Для игры требуется лицензионный аккаунт", style = MaterialTheme.typography.bodyLarge)
                                         Spacer(modifier = Modifier.height(16.dp))
                                         
-                                        when {
-                                            isAuthenticating -> CircularProgressIndicator()
-                                            authSuccess -> Text("Вы успешно вошли!", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
-                                            else -> Button(onClick = ::handleLogin, modifier = Modifier.height(48.dp)) {
-                                                Text("Войти через Microsoft")
+                                        if (isAuthenticating || authSuccess || authError != null) {
+                                            key(authAttempt) {
+                                                MicrosoftLoginFeedback(
+                                                    state = when {
+                                                        isAuthenticating -> ProgressState.Loading
+                                                        authSuccess -> ProgressState.Success
+                                                        else -> ProgressState.Error
+                                                    },
+                                                    error = authError
+                                                )
                                             }
                                         }
-                                        
-                                        authError?.let {
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                        if (!isAuthenticating && !authSuccess) {
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            Button(onClick = ::handleLogin, modifier = Modifier.height(48.dp)) {
+                                                Text(if (authError != null) "Попробовать снова" else "Войти через Microsoft")
+                                            }
                                         }
                                     }
                                 }
@@ -182,7 +196,7 @@ fun FirstRunWizard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 if (currentStep != WizardStep.WELCOME) {
-                    OutlinedButton(onClick = { 
+                    OutlinedButton(enabled = !isAuthenticating, onClick = {
                         currentStep = WizardStep.values()[currentStep.ordinal - 1] 
                     }) {
                         Text("Назад")
@@ -192,7 +206,7 @@ fun FirstRunWizard(
                 }
 
                 if (currentStep != WizardStep.FINISH) {
-                    Button(onClick = { 
+                    Button(enabled = !isAuthenticating, onClick = {
                         currentStep = WizardStep.values()[currentStep.ordinal + 1] 
                     }) {
                         Text("Далее")

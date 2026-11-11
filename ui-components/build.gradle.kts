@@ -8,20 +8,15 @@ plugins {
 group = "org.chokopieum.software.ui"
 version = "1.0-SNAPSHOT"
 
-repositories {
-    mavenCentral()
-    google()
-    maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
-}
 
 dependencies {
     implementation(project(":core"))
     implementation(compose.desktop.currentOs)
-    implementation(compose.foundation)
-    implementation(compose.runtime)
-    implementation(compose.ui)
-    implementation(compose.components.uiToolingPreview)
-    implementation(compose.components.resources)
+    implementation("org.jetbrains.compose.foundation:foundation:1.12.2")
+    implementation("org.jetbrains.compose.runtime:runtime:1.12.2")
+    implementation("org.jetbrains.compose.ui:ui:1.12.2")
+    implementation("org.jetbrains.compose.components:components-ui-tooling-preview:1.12.2")
+    implementation("org.jetbrains.compose.components:components-resources:1.12.2")
 }
 
 compose.resources {
@@ -42,3 +37,7 @@ compose.resources {
  //   classpath = sourceSets["main"].runtimeClasspath
  //   mainClass.set("org.chokopieum.software.ui.MateriaCircularProgressIndicatorPreviewKt")
 //}
+
+kotlin {
+    jvmToolchain(25)
+}

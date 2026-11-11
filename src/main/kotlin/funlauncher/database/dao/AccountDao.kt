@@ -11,14 +11,26 @@ package funlauncher.database.dao
 import funlauncher.auth.Account
 import funlauncher.auth.MicrosoftAccount
 import funlauncher.auth.OfflineAccount
-import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.v1.core.*
+import org.jetbrains.exposed.v1.jdbc.*
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 
 class AccountDao {
 
     fun getAll(): List<Account> {
         return transaction {
+            // Repair each legacy row by its primary key: several rows can share the zero UUID.
+            val broken = Accounts.selectAll().where {
+                (Accounts.type eq "offline") and
+                    ((Accounts.uuid eq "00000000-0000-0000-0000-000000000000") or
+                        (Accounts.uuid eq "00000000000000000000000000000000") or (Accounts.uuid eq ""))
+            }.toList()
+            broken.forEach { row ->
+                Accounts.update({ Accounts.id eq row[Accounts.id] }) {
+                    it[uuid] = OfflineAccount.uuidFor(row[Accounts.username])
+                }
+            }
             Accounts.selectAll().map { toAccount(it) }
         }
     }
@@ -27,8 +39,11 @@ class AccountDao {
         transaction {
             Accounts.insert {
                 it[username] = account.username
-                it[uuid] = account.uuid
-                it[accessToken] = account.accessToken
+                it[uuid] = if (account is OfflineAccount &&
+                    (account.uuid.isBlank() || account.uuid.replace("-", "").all { c -> c == '0' })) {
+                    OfflineAccount.uuidFor(account.username)
+                } else account.uuid
+                it[accessToken] = if (account is MicrosoftAccount) "" else account.accessToken
                 it[isLicensed] = account.isLicensed
                 when (account) {
                     is MicrosoftAccount -> {
@@ -43,9 +58,30 @@ class AccountDao {
         }
     }
 
+    fun clearMicrosoftTokens() {
+        transaction {
+            Accounts.update({ Accounts.type eq "microsoft" }) { it[accessToken] = "" }
+        }
+    }
+
+    fun saveMicrosoft(account: MicrosoftAccount) {
+        transaction {
+            val updated = Accounts.update({ (Accounts.uuid eq account.uuid) and (Accounts.type eq "microsoft") }) {
+                it[username] = account.username
+                it[skinUrl] = account.skinUrl
+                it[accessToken] = ""
+                it[isLicensed] = true
+            }
+            if (updated == 0) add(account)
+        }
+    }
+
     fun delete(account: Account) {
         transaction {
-            Accounts.deleteWhere { Accounts.uuid eq account.uuid }
+            val accountType = if (account is MicrosoftAccount) "microsoft" else "offline"
+            Accounts.deleteWhere {
+                (Accounts.uuid eq account.uuid) and (Accounts.username eq account.username) and (Accounts.type eq accountType)
+            }
         }
     }
 
@@ -57,7 +93,7 @@ class AccountDao {
 
     fun exists(username: String): Boolean {
         return transaction {
-            Accounts.select { Accounts.username eq username }.count() > 0
+            Accounts.selectAll().where { Accounts.username eq username }.count() > 0
         }
     }
 
@@ -67,7 +103,7 @@ class AccountDao {
             "microsoft" -> MicrosoftAccount(
                 username = row[Accounts.username],
                 uuid = row[Accounts.uuid],
-                accessToken = row[Accounts.accessToken],
+                accessToken = "",
                 skinUrl = row[Accounts.skinUrl],
                 isLicensed = row[Accounts.isLicensed]
             )

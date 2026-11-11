@@ -8,7 +8,16 @@
 
 package ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,10 +27,14 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.SpanStyle
@@ -33,7 +46,17 @@ import androidx.compose.ui.unit.dp
 import funlauncher.AppSettings
 import funlauncher.Theme
 import funlauncher.auth.AccountManager
-import funlauncher.game.VersionMetadataFetcher
+import funlauncher.managers.CacheManager
+import ui.widgets.RamSelector
+import ui.widgets.ThemePicker
+import ui.widgets.LaunchOptionsFields
+import funlauncher.utils.validateLaunchOptions
+import java.lang.management.ManagementFactory
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import funlauncher.openUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -41,7 +64,6 @@ import org.chokopieum.software.materia_launcher.generated.resources.GitHub
 import org.chokopieum.software.materia_launcher.generated.resources.MLicon
 import org.chokopieum.software.materia_launcher.generated.resources.Res
 import org.jetbrains.compose.resources.painterResource
-import ui.dialogs.LaunchSettingsDialog
 import ui.viewmodel.AccountViewModel
 import java.io.File
 import java.net.URI
@@ -111,8 +133,12 @@ fun SettingsTab(
     onOpenJavaManager: () -> Unit,
     accountManager: AccountManager,
     coroutineScope: CoroutineScope,
-    versionMetadataFetcher: VersionMetadataFetcher, // Добавлен новый параметр
-    snackbarHostState: SnackbarHostState // Добавлен новый параметр
+    cacheManager: CacheManager,
+    startupSettings: AppSettings,
+    saving: Boolean,
+    saveError: String?,
+    saved: Boolean,
+    onRetrySave: () -> Unit
 ) {
     var currentSection by remember { mutableStateOf(SettingsSection.Appearance) }
     val accountViewModel = remember { AccountViewModel(accountManager, coroutineScope) }
@@ -132,8 +158,9 @@ fun SettingsTab(
                 val isSelected = currentSection == section
                 TextButton(
                     onClick = { currentSection = section },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().semantics { selected = isSelected },
                     colors = ButtonDefaults.textButtonColors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
                         contentColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )
                 ) {
@@ -152,13 +179,50 @@ fun SettingsTab(
 
         Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
 
-        Box(modifier = Modifier.weight(1f).padding(16.dp)) {
-            when (currentSection) {
-                SettingsSection.Appearance -> AppearanceSettings(currentSettings, onSave)
-                SettingsSection.Launch -> LaunchSettings(currentSettings, onSave, onOpenJavaManager, accountViewModel)
-                SettingsSection.Cache -> CacheSettings(versionMetadataFetcher, snackbarHostState, coroutineScope)
-                SettingsSection.About -> AboutScreen()
+        Box(modifier = Modifier.weight(1f).fillMaxHeight().padding(24.dp), contentAlignment = Alignment.TopCenter) {
+        AnimatedContent(
+            targetState = currentSection,
+            modifier = Modifier.widthIn(max = 860.dp).fillMaxSize().clipToBounds(),
+            transitionSpec = {
+                val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                ((fadeIn(tween(200, delayMillis = 40)) +
+                    slideInVertically(tween(240)) { direction * (it / 40).coerceAtLeast(1) }) togetherWith
+                    (fadeOut(tween(120)) +
+                        slideOutVertically(tween(160)) { -direction * (it / 40).coerceAtLeast(1) }))
+                    .using(null)
+            },
+            label = "Settings section"
+        ) { section ->
+        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(section.title, style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface)
+            if (currentSettings.language != startupSettings.language ||
+                currentSettings.useBorderlessWindow != startupSettings.useBorderlessWindow) {
+                OutlinedCard(Modifier.fillMaxWidth()) {
+                    Text("Некоторые изменения вступят в силу после перезапуска приложения.", Modifier.padding(16.dp))
+                }
             }
+            when {
+                saving -> Text("Сохранение…", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                saveError != null -> OutlinedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(saveError, color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = onRetrySave) { Text("Повторить сохранение") }
+                    }
+                }
+                saved -> Text("Настройки сохранены", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            val save: (AppSettings) -> Unit = { if (!saving) onSave(it) }
+            Box(Modifier.weight(1f)) { when (section) {
+                SettingsSection.Appearance -> AppearanceSettings(currentSettings, save, saving)
+                SettingsSection.Launch -> LaunchSettings(currentSettings, save, onOpenJavaManager, accountViewModel, saving)
+                SettingsSection.Cache -> CacheSettings(cacheManager)
+                SettingsSection.About -> AboutScreen()
+            } }
+        }
+        }
         }
     }
 }
@@ -167,23 +231,10 @@ fun SettingsTab(
 @Composable
 private fun AppearanceSettings(
     currentSettings: AppSettings,
-    onSave: (AppSettings) -> Unit
+    onSave: (AppSettings) -> Unit,
+    saving: Boolean
 ) {
-    var showRestartDialog by remember { mutableStateOf(false) }
     val languages = remember { mapOf("ru" to "Русский", "en" to "English") }
-
-    if (showRestartDialog) {
-        AlertDialog(
-            onDismissRequest = { showRestartDialog = false },
-            title = { Text("Перезапуск требуется") },
-            text = { Text("Для применения нового языка необходимо перезапустить приложение.") },
-            confirmButton = {
-                Button(onClick = { showRestartDialog = false }) {
-                    Text("OK")
-                }
-            }
-        )
-    }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -193,18 +244,8 @@ private fun AppearanceSettings(
             Column(Modifier.padding(16.dp)) {
                 Text("Тема", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(16.dp))
-                val themeOptions = Theme.values().map { it.name }
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    themeOptions.forEachIndexed { index, label ->
-                        SegmentedButton(
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = themeOptions.size),
-                            onClick = { onSave(currentSettings.copy(theme = Theme.values()[index])) },
-                            selected = currentSettings.theme.name == label
-                        ) {
-                            Text(label)
-                        }
-                    }
-                }
+                ThemePicker(currentSettings.theme, enabled = !saving,
+                    onSelect = { theme -> if (theme != currentSettings.theme) onSave(currentSettings.copy(theme = theme)) })
             }
         }
         OutlinedCard(modifier = Modifier.fillMaxWidth()) {
@@ -215,12 +256,13 @@ private fun AppearanceSettings(
 
                 ExposedDropdownMenuBox(
                     expanded = expanded,
-                    onExpandedChange = { expanded = !expanded }
+                    onExpandedChange = { if (!saving) expanded = !expanded }
                 ) {
                     OutlinedTextField(
                         value = languages[currentSettings.language] ?: currentSettings.language,
                         onValueChange = {},
                         readOnly = true,
+                        enabled = !saving,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                         modifier = Modifier.menuAnchor().fillMaxWidth()
                     )
@@ -230,11 +272,12 @@ private fun AppearanceSettings(
                     ) {
                         languages.forEach { (code, name) ->
                             DropdownMenuItem(
+                                enabled = !saving,
                                 text = { Text(name) },
                                 onClick = {
                                     if (currentSettings.language != code) {
                                         onSave(currentSettings.copy(language = code))
-                                        showRestartDialog = true
+
                                     }
                                     expanded = false
                                 }
@@ -252,10 +295,11 @@ private fun AppearanceSettings(
                 ) {
                     Text("Без системной рамки (требуется перезапуск)", modifier = Modifier.weight(1f))
                     Switch(
+                        enabled = !saving,
                         checked = currentSettings.useBorderlessWindow,
                         onCheckedChange = {
                             onSave(currentSettings.copy(useBorderlessWindow = it))
-                            showRestartDialog = true
+
                         }
                     )
                 }
@@ -269,10 +313,33 @@ private fun LaunchSettings(
     currentSettings: AppSettings,
     onSave: (AppSettings) -> Unit,
     onOpenJavaManager: () -> Unit,
-    accountViewModel: AccountViewModel
+    accountViewModel: AccountViewModel,
+    saving: Boolean
 ) {
-    var showLaunchSettingsDialog by remember { mutableStateOf(false) }
+    var maxRam by remember(currentSettings.maxRamMb) { mutableStateOf(currentSettings.maxRamMb) }
+    var javaArgs by remember(currentSettings.javaArgs) { mutableStateOf(currentSettings.javaArgs) }
+    var envVars by remember(currentSettings.envVars) { mutableStateOf(currentSettings.envVars) }
+    var advanced by remember { mutableStateOf(false) }
+    var confirmRisk by remember { mutableStateOf(false) }
+    val options = validateLaunchOptions(javaArgs, envVars, maxRam)
+    val saveLaunch = { onSave(currentSettings.copy(maxRamMb = maxRam, javaArgs = javaArgs, envVars = envVars)) }
+    val totalRam = remember {
+        (ManagementFactory.getOperatingSystemMXBean() as? com.sun.management.OperatingSystemMXBean)
+            ?.totalMemorySize?.div(1024 * 1024)?.toInt() ?: 8192
+    }
     var showLogoutConfirmDialog by remember { mutableStateOf(false) }
+    val accountError by accountViewModel.errorMessage.collectAsState()
+
+    accountError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { accountViewModel.clearErrorMessage() },
+            title = { Text("Ошибка аккаунта Microsoft") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { accountViewModel.clearErrorMessage() }) { Text("OK") }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -286,23 +353,41 @@ private fun LaunchSettings(
                 ) {
                     Text("Запускать консоль при запуске игры", modifier = Modifier.weight(1f))
                     Switch(
+                        enabled = !saving,
                         checked = currentSettings.showConsoleOnLaunch,
                         onCheckedChange = { onSave(currentSettings.copy(showConsoleOnLaunch = it)) }
                     )
                 }
-                Divider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(onClick = onOpenJavaManager, modifier = Modifier.weight(1f)) {
-                        Text("Управление Java")
-                    }
-                    Button(onClick = { showLaunchSettingsDialog = true }, modifier = Modifier.weight(1f)) {
-                        Text("Глобальные настройки запуска")
-                    }
+            }
+        }
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Параметры по умолчанию", style = MaterialTheme.typography.titleMedium)
+                Text("Применяются к сборкам без собственных значений памяти, аргументов Java и переменных среды.",
+                    style = MaterialTheme.typography.bodySmall)
+                RamSelector(maxRam, totalRam, { maxRam = it })
+                TextButton(onClick = { advanced = !advanced }) {
+                    Text(if (advanced) "Скрыть дополнительные параметры" else "Дополнительно")
                 }
-                Divider()
+                if (advanced) LaunchOptionsFields(javaArgs, { javaArgs = it }, envVars, { envVars = it }, maxRam)
+                Button(enabled = !saving && options.valid &&
+                    (maxRam != currentSettings.maxRamMb || javaArgs != currentSettings.javaArgs || envVars != currentSettings.envVars),
+                    onClick = { if (options.risks.isNotEmpty()) confirmRisk = true else saveLaunch() }) {
+                    Text("Сохранить параметры запуска")
+                }
+            }
+        }
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Java", style = MaterialTheme.typography.titleMedium)
+                Text("Java выбирается автоматически по версии игры, если в настройках сборки не указан путь.")
+                Button(onClick = onOpenJavaManager) { Text("Управление Java") }
+            }
+        }
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Аккаунты", style = MaterialTheme.typography.titleMedium)
+                Text("Очистка сессии потребует повторного входа в аккаунты Microsoft.", style = MaterialTheme.typography.bodySmall)
                 Button(
                     onClick = { showLogoutConfirmDialog = true },
                     modifier = Modifier.fillMaxWidth(),
@@ -314,12 +399,14 @@ private fun LaunchSettings(
         }
     }
 
-    if (showLaunchSettingsDialog) {
-        LaunchSettingsDialog(
-            currentSettings = currentSettings,
-            onDismiss = { showLaunchSettingsDialog = false },
-            onSave = onSave
-        )
+    if (confirmRisk) {
+        AlertDialog(onDismissRequest = { confirmRisk = false },
+            title = { Text("Подтверждение параметров запуска") },
+            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState())) {
+                options.risks.forEach { Text(it, Modifier.padding(bottom = 12.dp)) }
+            } },
+            confirmButton = { Button(onClick = { confirmRisk = false; saveLaunch() }) { Text("Сохранить") } },
+            dismissButton = { TextButton(onClick = { confirmRisk = false }) { Text("Отмена") } })
     }
 
     if (showLogoutConfirmDialog) {
@@ -348,46 +435,41 @@ private fun LaunchSettings(
 }
 
 @Composable
-private fun CacheSettings(
-    versionMetadataFetcher: VersionMetadataFetcher,
-    snackbarHostState: SnackbarHostState,
-    coroutineScope: CoroutineScope
-) {
-    var isUpdatingCache by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+private fun CacheSettings(cacheManager: CacheManager) {
+    val scope = rememberCoroutineScope()
+    var updating by remember { mutableStateOf(false) }
+    val statusFlow = remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }
+    val status by statusFlow.collectAsState()
+    var error by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        OutlinedCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Управление кэшем", style = MaterialTheme.typography.titleMedium)
-                Text("Обновите кэши версий игры и загрузчиков, чтобы получить актуальную информацию.")
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            isUpdatingCache = true
-                            snackbarHostState.showSnackbar("Обновление кэшей версий...", duration = SnackbarDuration.Indefinite)
-                            versionMetadataFetcher.prefetchVersionMetadata { status ->
-                                coroutineScope.launch { snackbarHostState.showSnackbar(status, duration = SnackbarDuration.Short) }
+                Text("Метаданные версий", style = MaterialTheme.typography.titleMedium)
+                Text("Обновляет списки версий игры и загрузчиков. Установленные сборки не изменяются.")
+                status?.let { Text(it, color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (updating) LinearProgressIndicator(Modifier.fillMaxWidth())
+                Button(enabled = !updating, onClick = {
+                    updating = true
+                    error = false
+                    statusFlow.value = "Обновление метаданных…"
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) {
+                                cacheManager.refreshMetadata { message ->
+                                    statusFlow.value = message
+                                }
                             }
-                            snackbarHostState.showSnackbar("Кэши версий обновлены!", duration = SnackbarDuration.Short)
-                            isUpdatingCache = false
+                            statusFlow.value = "Метаданные версий обновлены"
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = true
+                            statusFlow.value = "Не удалось обновить метаданные. Проверьте подключение и повторите попытку."
+                        } finally {
+                            updating = false
                         }
-                    },
-                    enabled = !isUpdatingCache,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isUpdatingCache) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Обновление...")
-                    } else {
-                        Icon(Icons.Default.Refresh, contentDescription = "Обновить кэши")
-                        Spacer(Modifier.width(8.dp))
-                        Text("Обновить кэши версий")
                     }
-                }
+                }) { Text(if (updating) "Обновление…" else if (error) "Повторить" else "Обновить метаданные") }
             }
         }
     }
@@ -396,97 +478,74 @@ private fun CacheSettings(
 @Composable
 private fun AboutScreen() {
     var showTechInfo by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Image(
-            painter = painterResource(Res.drawable.MLicon),
-            contentDescription = "Materia Logo",
-            modifier = Modifier.size(128.dp)
-        )
-        Text(
-            text = "Materia",
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        Text("Версия: ${AppInfo.version}", color = MaterialTheme.colorScheme.onSurface)
-        Text("Сборка: ${AppInfo.buildNumber}", color = MaterialTheme.colorScheme.onSurface)
-
-        Spacer(Modifier.height(8.dp))
-
-        IconButton(onClick = { openUri(URI("https://github.com/Chokopieum-Software/MateriaKraft-Launcher")) }) {
-            Image(
-                painter = painterResource(Res.drawable.GitHub),
-                contentDescription = "GitHub",
-                modifier = Modifier.size(128.dp)
-            )
-        }
-
-        Divider(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(
+            modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Благодарности",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.height(8.dp))
-                Text("MarkAdderly (Тестирование, изображения)", color = MaterialTheme.colorScheme.onSurface)
-                Text("Zioldel (Тестирование)", color = MaterialTheme.colorScheme.onSurface)
-                Text("pon4iksdonut (Изображения)", color = MaterialTheme.colorScheme.onSurface)
+            OutlinedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                            Image(painterResource(Res.drawable.MLicon), contentDescription = null,
+                                modifier = Modifier.padding(12.dp).size(56.dp))
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Materia", style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.SemiBold)
+                            Text("Лаунчер Minecraft", style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Text("Версия ${AppInfo.version}  ·  Сборка ${AppInfo.buildNumber}",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelMedium)
+                    }
+                    FilledTonalButton(onClick = {
+                        openUri(URI("https://github.com/Chokopieum-Software/MateriaKraft-Launcher"))
+                    }) {
+                        Icon(painterResource(Res.drawable.GitHub), contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Проект на GitHub")
+                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                }
             }
-        }
-
-        TextButton(onClick = { showTechInfo = !showTechInfo }) {
-            Text(if (showTechInfo) "Скрыть техническую информацию" else "Показать техническую информацию")
-        }
-
-        if (showTechInfo) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    val techInfoItems = mapOf(
-                        "Source" to AppInfo.buildSource,
-                        "Gradle" to AppInfo.gradleVersion,
-                        "OS" to AppInfo.osInfo,
-                        "Render API" to AppInfo.renderApi,
-                    )
-                    techInfoItems.forEach { (key, value) ->
-                        Row {
-                            Text(
-                                text = "${key.padEnd(12)}: ",
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(text = value, color = MaterialTheme.colorScheme.onSurface)
+            OutlinedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = { showTechInfo = !showTechInfo }, modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(16.dp)) {
+                    Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Техническая информация", modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurface)
+                    Icon(if (showTechInfo) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (showTechInfo) "Свернуть" else "Развернуть")
+                }
+                AnimatedVisibility(showTechInfo) {
+                    SelectionContainer {
+                        Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            HorizontalDivider()
+                            listOf("Источник" to AppInfo.buildSource, "Gradle" to AppInfo.gradleVersion,
+                                "Система" to AppInfo.osInfo, "Рендеринг" to AppInfo.renderApi).forEach { (label, value) ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Text(label, Modifier.width(100.dp), style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
                         }
                     }
                 }
             }
+            Text(
+                "Не является официальным продуктом Minecraft. Не одобрено и не связано с Mojang или Microsoft.",
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        
-        Spacer(Modifier.weight(1f))
-
-        Text(
-            text = "LEGAL: NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.",
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.Gray
-        )
     }
 }

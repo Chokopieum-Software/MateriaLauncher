@@ -10,10 +10,10 @@ import funlauncher.game.VersionMetadataFetcher
 import funlauncher.managers.BuildManager
 import funlauncher.managers.CacheManager
 import funlauncher.managers.PathManager
-import funlauncher.modpack.ModpackInstaller
 import funlauncher.net.*
-import funlauncher.utils.VersionMatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -26,16 +26,13 @@ class ModificationsViewModel(
     private val cacheManager: CacheManager,
     private val coroutineScope: CoroutineScope
 ) {
-    private val modrinthApi = ModrinthApi(cacheManager)
+    val api = ModrinthApi(cacheManager)
     private val versionMetadataFetcher = VersionMetadataFetcher(buildManager, pathManager)
-    val modpackInstaller = ModpackInstaller(buildManager, modrinthApi, pathManager, coroutineScope)
 
     var searchQuery by mutableStateOf("")
     var searchResult by mutableStateOf<SearchResult?>(null)
     var isLoading by mutableStateOf(false)
 
-    var selectedBuildForFilter by mutableStateOf<MinecraftBuild?>(null)
-    var showBuildSelectionDialog by mutableStateOf(false)
     var showVersionSelectionDialog by mutableStateOf(false)
     var showInstallDialog by mutableStateOf(false)
 
@@ -48,6 +45,8 @@ class ModificationsViewModel(
     var selectedProject by mutableStateOf<Project?>(null)
     var projectVersions by mutableStateOf<List<Version>>(emptyList())
     var isLoadingProjectDetails by mutableStateOf(false)
+    var projectDetailsError by mutableStateOf<String?>(null)
+    private var projectDetailsJob: Job? = null
 
     val allBuilds = mutableStateListOf<MinecraftBuild>()
 
@@ -81,18 +80,22 @@ class ModificationsViewModel(
     private fun loadInitialData() {
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val fetchedCategories = modrinthApi.getCategories()
+                val fetchedCategories = api.getCategories()
                 withContext(Dispatchers.Main) {
                     allCategories.addAll(fetchedCategories)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // Handle error
             }
             try {
-                val fetchedLoaders = modrinthApi.getLoaders()
+                val fetchedLoaders = api.getLoaders()
                 withContext(Dispatchers.Main) {
                     allLoaders.addAll(fetchedLoaders)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // Handle error
             }
@@ -120,6 +123,8 @@ class ModificationsViewModel(
                     }
                     cacheManager.getOrFetch<List<String>>("vanilla_versions_release") { freshVersions }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // Handle error
             }
@@ -128,10 +133,12 @@ class ModificationsViewModel(
 
 
     fun onDispose() {
-        modrinthApi.close()
+        api.close()
     }
 
     fun selectProject(hit: Hit) {
+        projectDetailsJob?.cancel()
+        projectDetailsError = null
         // Create a temporary Project object from the Hit to show immediately
         val tempProject = Project(
             id = hit.projectId,
@@ -162,35 +169,28 @@ class ModificationsViewModel(
         projectVersions = emptyList()
         isLoadingProjectDetails = true
 
-        coroutineScope.launch(Dispatchers.IO) {
+        projectDetailsJob = coroutineScope.launch(Dispatchers.IO) {
             try {
-                val fullProject = modrinthApi.getProject(hit.projectId)
-                val versions = modrinthApi.getProjectVersions(hit.projectId)
+                val fullProject = api.getProject(hit.projectId)
                 withContext(Dispatchers.Main) {
+                    if (selectedProject?.id != hit.projectId) return@withContext
                     selectedProject = fullProject
-                    projectVersions = versions
                 }
+                val versions = api.getProjectVersions(hit.projectId)
+                withContext(Dispatchers.Main) {
+                    if (selectedProject?.id == hit.projectId) projectVersions = versions
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                // Handle error, maybe show snackbar
+                withContext(Dispatchers.Main) {
+                    if (selectedProject?.id == hit.projectId) projectDetailsError = "Не удалось загрузить данные проекта. Проверьте подключение и откройте проект ещё раз."
+                }
             } finally {
                 withContext(Dispatchers.Main) {
-                    isLoadingProjectDetails = false
+                    if (selectedProject?.id == hit.projectId) isLoadingProjectDetails = false
                 }
             }
-        }
-    }
-
-    fun getFilteredVersionsForInstall(): List<Version> {
-        val build = selectedBuildForFilter ?: return projectVersions
-        
-        val ignoreLoaderCheck = selectedType == ModificationType.RESOURCE_PACKS || 
-                                selectedType == ModificationType.SHADERS ||
-                                selectedType == ModificationType.DATAPACKS
-
-        return projectVersions.filter { version ->
-            val versionMatch = version.gameVersions.any { gameVersion -> VersionMatcher.isCompatible(build.version, gameVersion) }
-            val loaderMatch = ignoreLoaderCheck || version.loaders.isEmpty() || version.loaders.any { loader -> build.type.name.contains(loader, ignoreCase = true) }
-            versionMatch && loaderMatch
         }
     }
 
@@ -205,6 +205,8 @@ class ModificationsViewModel(
         }
         facetsList.add(listOf("project_type:$actualProjectType"))
         
+        if (selectedType == ModificationType.DATAPACKS) facetsList.add(listOf("categories:datapack"))
+
         // Game Versions
         if (selectedVersions.isNotEmpty()) {
             facetsList.add(selectedVersions.map { "versions:$it" })
@@ -248,10 +250,12 @@ class ModificationsViewModel(
         coroutineScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    modrinthApi.search(query = searchQuery, facets = facetsJson, offset = currentPage * pageSize, limit = pageSize)
+                    api.search(query = searchQuery, facets = facetsJson, offset = currentPage * pageSize, limit = pageSize)
                 }
                 searchResult = result
                 hasMoreResults = result.hits.size == pageSize
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 searchResult = SearchResult(emptyList(), 0, pageSize, 0)
                 hasMoreResults = false
@@ -273,7 +277,7 @@ class ModificationsViewModel(
         coroutineScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    modrinthApi.search(query = searchQuery, facets = facetsJson, offset = currentPage * pageSize, limit = pageSize)
+                    api.search(query = searchQuery, facets = facetsJson, offset = currentPage * pageSize, limit = pageSize)
                 }
 
                 searchResult = searchResult?.copy(
@@ -281,6 +285,8 @@ class ModificationsViewModel(
                 ) ?: result
 
                 hasMoreResults = result.hits.size == pageSize
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 currentPage--
             } finally {
@@ -312,30 +318,4 @@ class ModificationsViewModel(
         })
     }
 
-    fun applyBuildFilter() {
-        val build = selectedBuildForFilter
-        if (build != null) {
-            // 1. Find the best matching game version from the build's version string.
-            val fullVersion = build.version
-            val bestMatch = allVanillaVersions
-                .filter { vanillaVersion -> VersionMatcher.isCompatible(fullVersion, vanillaVersion) }
-                .maxByOrNull { it.length }
-
-            selectedVersions.clear()
-            if (bestMatch != null) {
-                selectedVersions.add(bestMatch)
-            }
-            
-            // Set Loader from build.type
-            val buildLoaderName = build.type.name.lowercase() // e.g., "fabric", "forge"
-            val matchingLoader = allLoaders.find { it.name.lowercase() == buildLoaderName }
-            selectedLoaders.clear()
-            if (matchingLoader != null) {
-                selectedLoaders[matchingLoader.name] = FilterState.INCLUDED
-            }
-        } else {
-            selectedVersions.clear()
-            selectedLoaders.clear()
-        }
-    }
 }

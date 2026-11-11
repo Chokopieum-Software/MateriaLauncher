@@ -5,9 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,9 +14,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.mikepenz.markdown.m3.Markdown
-import com.mikepenz.markdown.m3.markdownColor
-import com.mikepenz.markdown.m3.markdownTypography
 import funlauncher.net.Project
 import funlauncher.net.Version
 import ui.widgets.ImageLoader
@@ -27,6 +22,7 @@ import ui.widgets.ImageLoader
 fun ModificationDetails(
     project: Project,
     isLoadingDetails: Boolean,
+    detailsError: String? = null,
     onInstallClick: () -> Unit
 ) {
     Column(
@@ -48,7 +44,7 @@ fun ModificationDetails(
             
             Button(
                 onClick = onInstallClick,
-                enabled = !isLoadingDetails,
+                enabled = !isLoadingDetails && detailsError == null,
                 modifier = Modifier.height(48.dp)
             ) {
                 if (isLoadingDetails) {
@@ -64,7 +60,7 @@ fun ModificationDetails(
 
         // Основная информация (скроллируемая)
         Column(
-            modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())
+            modifier = Modifier.fillMaxWidth().weight(1f)
         ) {
             // Галерея
             if (project.gallery.isNotEmpty()) {
@@ -90,11 +86,16 @@ fun ModificationDetails(
             // Описание
             Text("Описание", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
-            Markdown(
-                content = project.body ?: "Нет описания.",
-                colors = markdownColor(),
-                typography = markdownTypography()
-            )
+            if (detailsError != null) Text(detailsError, color = MaterialTheme.colorScheme.error)
+            if (isLoadingDetails && project.body.isBlank()) {
+                Text("Загрузка описания…")
+            } else key(project.id) {
+                HtmlDescription(
+                    markdown = project.body,
+                    base = "https://modrinth.com/"+project.projectType+"/"+project.slug,
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                )
+            }
         }
     }
 }

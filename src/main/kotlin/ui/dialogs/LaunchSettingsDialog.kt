@@ -9,6 +9,8 @@
 package ui.dialogs
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,7 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import funlauncher.AppSettings
 import java.lang.management.ManagementFactory
-import kotlin.math.roundToInt
+import ui.widgets.RamSelector
+import ui.widgets.LaunchOptionsFields
+import funlauncher.utils.validateLaunchOptions
 
 @Composable
 fun LaunchSettingsDialog(
@@ -27,12 +31,29 @@ fun LaunchSettingsDialog(
     var maxRam by remember { mutableStateOf(currentSettings.maxRamMb) }
     var javaArgs by remember { mutableStateOf(currentSettings.javaArgs) }
     var envVars by remember { mutableStateOf(currentSettings.envVars) }
+    val options = validateLaunchOptions(javaArgs, envVars, maxRam)
+    var confirmRisk by remember { mutableStateOf(false) }
+    val save = {
+        onSave(currentSettings.copy(maxRamMb = maxRam, javaArgs = javaArgs, envVars = envVars))
+        onDismiss()
+    }
+    if (confirmRisk) {
+        AlertDialog(
+            onDismissRequest = { confirmRisk = false },
+            title = { Text("Подтверждение параметров запуска") },
+            text = { Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                options.risks.forEach { Text(it, Modifier.padding(bottom = 12.dp)) }
+            } },
+            confirmButton = { Button(onClick = { confirmRisk = false; save() }) { Text("Сохранить, несмотря на риски") } },
+            dismissButton = { TextButton(onClick = { confirmRisk = false }) { Text("Вернуться к настройкам") } }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Глобальные настройки запуска") },
         text = {
-            Column(modifier = Modifier.padding(top = 16.dp)) {
+            Column(modifier = Modifier.heightIn(max = 550.dp).verticalScroll(rememberScrollState()).padding(top = 16.dp)) {
                 val totalSystemMemory = remember {
                     (ManagementFactory.getOperatingSystemMXBean() as com.sun.management.OperatingSystemMXBean).totalMemorySize / (1024 * 1024)
                 }
@@ -42,25 +63,12 @@ fun LaunchSettingsDialog(
                     onRamChange = { maxRam = it }
                 )
                 Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = javaArgs,
-                    onValueChange = { javaArgs = it },
-                    label = { Text("Аргументы Java") },
-                    modifier = Modifier.fillMaxWidth().height(100.dp)
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = envVars,
-                    onValueChange = { envVars = it },
-                    label = { Text("Переменные среды (VAR=VAL)") },
-                    modifier = Modifier.fillMaxWidth().height(100.dp)
-                )
+                LaunchOptionsFields(javaArgs, { javaArgs = it }, envVars, { envVars = it }, maxRam)
             }
         },
         confirmButton = {
-            Button(onClick = {
-                onSave(currentSettings.copy(maxRamMb = maxRam, javaArgs = javaArgs, envVars = envVars))
-                onDismiss()
+            Button(enabled = options.valid, onClick = {
+                if (options.risks.isNotEmpty()) confirmRisk = true else save()
             }) {
                 Text("Сохранить")
             }
@@ -71,30 +79,4 @@ fun LaunchSettingsDialog(
             }
         }
     )
-}
-
-@Composable
-private fun RamSelector(
-    currentRam: Int,
-    totalRam: Int,
-    onRamChange: (Int) -> Unit
-) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Выделение ОЗУ: $currentRam MB", modifier = Modifier.weight(1f))
-            OutlinedTextField(
-                value = currentRam.toString(),
-                onValueChange = { onRamChange(it.toIntOrNull() ?: 0) },
-                modifier = Modifier.width(100.dp),
-                singleLine = true
-            )
-        }
-        Slider(
-            value = currentRam.toFloat(),
-            onValueChange = { onRamChange(it.roundToInt()) },
-            valueRange = 1024f..totalRam.toFloat(),
-            steps = (totalRam / 512) - 2,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
 }

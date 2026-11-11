@@ -1,14 +1,5 @@
-/*
- * Copyright 2025 Chokopieum Software
- *
- * НЕ ЯВЛЯЕТСЯ ОФИЦИАЛЬНЫМ ПРОДУКТОМ MINECRAFT. НЕ ОДОБРЕНО И НЕ СВЯЗАНО С КОМПАНИЕЙ MOJANG ИЛИ MICROSOFT.
- * Распространяется по лицензии MIT.
- * GITHUB: https://github.com/Chokopieum-Software/MateriaKraft-Launcher
- */
-
 package funlauncher.auth
 
-import com.github.javakeyring.Keyring
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
@@ -17,142 +8,94 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.URI
-import java.util.*
+import java.util.concurrent.TimeUnit
 
 class MateriaAuthenticator {
-
-    // --- КОНФИГУРАЦИЯ ---
-    private val clientId = "706fbc67-be98-4ded-bbe7-cc50097e2e2d"
-    // Используем localhost, как самый надежный способ для Desktop Java
-    private val redirectUri = URI("http://localhost")
-    private val authority = "https://login.microsoftonline.com/consumers/"
-    private val scopes = setOf("XboxLive.Signin", "Offline_access")
-
-    private val client = OkHttpClient()
+    companion object { val sessionLock = Any() }
+    private val scopes = setOf("XboxLive.Signin", "offline_access")
+    private val client = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build()
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-
-    // Настройка хранилища токенов
     private val tokenCacheAspect = object : ITokenCacheAccessAspect {
-        val service = "MateriaLauncher"
-        val accountKey = "MateriaAuthCache"
-
         override fun beforeCacheAccess(context: ITokenCacheAccessContext) {
-            try {
-                val keyring = Keyring.create()
-                val data = keyring.getPassword(service, accountKey)
-                if (data != null) context.tokenCache().deserialize(data)
-            } catch (_: Exception) {}
+            val data = SecureAuthStore.readCache()
+            if (!data.isNullOrBlank()) context.tokenCache().deserialize(data)
         }
-
         override fun afterCacheAccess(context: ITokenCacheAccessContext) {
             if (context.hasCacheChanged()) {
-                try {
-                    val keyring = Keyring.create()
-                    keyring.setPassword(service, accountKey, context.tokenCache().serialize())
-                } catch (e: Exception) {
-                    println("Warning: Не удалось сохранить сессию: ${e.message}")
-                }
+                SecureAuthStore.writeCache(context.tokenCache().serialize())
             }
         }
     }
+    private val app = PublicClientApplication.builder(MicrosoftCallback.CLIENT_ID)
+        .authority("https://login.microsoftonline.com/consumers/")
+        .setTokenCacheAccessAspect(tokenCacheAspect).build()
 
-    private val app: PublicClientApplication = PublicClientApplication.builder(clientId)
-        .authority(authority)
-        .setTokenCacheAccessAspect(tokenCacheAspect)
-        .build()
-
-    // --- ГЛАВНЫЙ МЕТОД ВХОДА ---
     fun login(): MinecraftProfile {
-        val msAccessToken = try {
-            println("[Materia] Пробую тихий вход...")
-            acquireTokenSilently()
-        } catch (_: Exception) {
-            println("[Materia] Тихий вход не удался, открываю браузер...")
-            acquireTokenInteractive()
-        }
+        MicrosoftCallback.ensureRegistered()
+        return profile(acquireTokenInteractive())
+    }
 
-        println("[Materia] Вход в Microsoft выполнен! Получаю профиль Xbox...")
-
-        val xboxToken = authXboxLive(msAccessToken).token
-        val xsts = authXSTS(xboxToken)
-
-        try {
-            println("[Materia] Проверяю лицензию Minecraft...")
-            val mcToken = authMinecraft(xsts.userHash, xsts.token)
-            val profile = getMinecraftProfile(mcToken)
-            println("[Materia] Лицензия найдена! Вход с профилем ${profile.name}")
-            return profile
+    /** Refresh for the exact Microsoft account associated with this Minecraft UUID. */
+    fun refresh(uuid: String): MinecraftProfile {
+        val homeId = SecureAuthStore.get("Minecraft:$uuid")
+            ?: error("Для этого аккаунта требуется повторный вход Microsoft.")
+        val account = app.accounts.join().firstOrNull { it.homeAccountId() == homeId }
+            ?: error("Сессия Microsoft отсутствует. Войдите в аккаунт повторно.")
+        val result = try {
+            app.acquireTokenSilently(SilentParameters.builder(scopes, account).build()).join()
         } catch (e: Exception) {
-            println("[Materia] Лицензия Minecraft не найдена или произошла ошибка: ${e.message}")
-            println("[Materia] Вход с профилем Xbox (${xsts.gamertag}).")
+            throw IllegalStateException("Не удалось обновить сессию Microsoft. Проверьте сеть или войдите повторно.", e)
+        }
+        val profile = profile(result)
+        check(profile.id == uuid) { "Microsoft вернул другой профиль Minecraft. Войдите повторно." }
+        return profile
+    }
 
-            val uuid = UUID.nameUUIDFromBytes("OfflinePlayer:${xsts.gamertag}".toByteArray()).toString()
+    private fun profile(result: IAuthenticationResult): MinecraftProfile {
+        val xbox = authXboxLive(result.accessToken())
+        val xsts = authXSTS(xbox.token)
+        val profile = getMinecraftProfile(authMinecraft(xsts.userHash, xsts.token))
+        SecureAuthStore.set("Minecraft:${profile.id}", result.account().homeAccountId())
+        return profile
+    }
 
-            return MinecraftProfile(
-                id = uuid,
-                name = xsts.gamertag,
-                accessToken = "0", // Стандарт для оффлайн-режима
-                skinUrl = null,
-                isLicensed = false
-            )
+    fun logout(uuids: List<String>) {
+        // Each operation creates a new MSAL client; clearing storage also recovers a corrupt cache.
+        SecureAuthStore.clearCache()
+        uuids.forEach { SecureAuthStore.delete("Minecraft:$it") }
+    }
+
+    fun forget(uuid: String) {
+        val homeId = SecureAuthStore.get("Minecraft:$uuid")
+        if (homeId != null) {
+            app.accounts.join().firstOrNull { it.homeAccountId() == homeId }?.let { app.removeAccount(it).join() }
+            SecureAuthStore.delete("Minecraft:$uuid")
         }
     }
 
-    fun logout() {
-        try {
-            // 1. Очищаем аккаунты из кэша MSAL в памяти
-            val accounts = app.accounts.join()
-            if (accounts.isNotEmpty()) {
-                for (acc in accounts) {
-                    app.removeAccount(acc).join()
-                }
-                println("[Materia] Аккаунты MSAL в памяти очищены.")
-            }
-
-            // 2. Удаляем сам файл кэша из системного хранилища
-            val keyring = Keyring.create()
-            keyring.deletePassword("MateriaLauncher", "MateriaAuthCache")
-            println("[Materia] Кэш токенов удален из системного хранилища.")
-
-        } catch (e: Exception) {
-            println("Warning: Не удалось полностью очистить сессию Microsoft: ${e.message}")
+    private fun acquireTokenInteractive(): IAuthenticationResult {
+        val state = MicrosoftCallback.randomValue()
+        val verifier = MicrosoftCallback.randomValue()
+        val code = MicrosoftCallback.awaitCode(state) {
+            app.getAuthorizationRequestUrl(authorizationParameters(state, verifier)).toURI()
         }
+        return app.acquireToken(AuthorizationCodeParameters.builder(code, MicrosoftCallback.redirectUri)
+            .scopes(scopes).codeVerifier(verifier).build()).join()
     }
 
-
-    // --- ЛОГИКА MSAL ---
-
-    private fun acquireTokenSilently(): String {
-        val accounts = app.accounts.join()
-        if (accounts.isEmpty()) throw Exception("Нет сохраненных аккаунтов")
-
-        val params = SilentParameters.builder(scopes, accounts.first()).build()
-        return app.acquireTokenSilently(params).join().accessToken()
-    }
-
-    private fun acquireTokenInteractive(): String {
-        // Настройка открытия браузера
-        val params = InteractiveRequestParameters.builder(redirectUri)
-            .scopes(scopes)
-            .systemBrowserOptions(
-                SystemBrowserOptions.builder()
-                    .htmlMessageSuccess("<html><body><center><h1>Вы успешно вошли в Materia Launcher!</h1><p>Можете закрыть эту вкладку и вернуться в лаунчер.</p></center></body></html>")
-                    .htmlMessageError("<html><body><center><h1>Ошибка входа :(</h1></center></body></html>")
-                    .build()
-            )
-            .build()
-
-        // Этот вызов сам откроет браузер, подождет, пока юзер войдет,
-        // поймает редирект на localhost и вернет токен.
-        return app.acquireToken(params).join().accessToken()
-    }
-
+    @Suppress("DEPRECATION")
+    internal fun authorizationParameters(state: String, verifier: String): AuthorizationRequestUrlParameters =
+        AuthorizationRequestUrlParameters.builder(MicrosoftCallback.redirectUri.toString(), scopes)
+                .state(state).codeChallenge(MicrosoftCallback.challenge(verifier)).codeChallengeMethod("S256")
+                .prompt(Prompt.SELECT_ACCOUNT)
+                // MSAL4J 1.26 rewrites ResponseMode.QUERY to FORM_POST. A custom scheme needs query.
+                .extraQueryParameters(mapOf("response_mode" to "query"))
+                .build()
     // --- MINECRAFT API ---
 
     data class XboxResponse(val token: String, val userHash: String)
-    data class XSTSResponse(val token: String, val userHash: String, val gamertag: String)
+    data class XSTSResponse(val token: String, val userHash: String)
     data class McTokenResponse(@SerializedName("access_token") val accessToken: String)
     data class MinecraftProfile(
         val id: String,
@@ -178,16 +121,9 @@ class MateriaAuthenticator {
         val jsonObj = gson.fromJson(resp, JsonObject::class.java)
         val xuiClaims = jsonObj.getAsJsonObject("DisplayClaims").getAsJsonArray("xui")[0].asJsonObject
 
-        val gamertag = if (xuiClaims.has("gtg")) {
-            xuiClaims.get("gtg").asString
-        } else {
-            "Xbox User" // Запасной вариант
-        }
-
         return XSTSResponse(
             token = jsonObj.get("Token").asString,
-            userHash = xuiClaims.get("uhs").asString,
-            gamertag = gamertag
+            userHash = xuiClaims.get("uhs").asString
         )
     }
 
@@ -205,11 +141,11 @@ class MateriaAuthenticator {
 
         client.newCall(request).execute().use {
             if (!it.isSuccessful) {
-                val errorBody = it.body?.string()
-                throw Exception("Ошибка получения профиля ($errorBody) или игра не куплена.")
+                if (it.code == 404) error("У аккаунта нет профиля Minecraft Java. Проверьте покупку игры и создание профиля.")
+                error("Не удалось получить профиль Minecraft (HTTP ${it.code}). Попробуйте позже.")
             }
 
-            val json = gson.fromJson(it.body!!.string(), JsonObject::class.java)
+            val json = gson.fromJson(it.body.string(), JsonObject::class.java)
             val id = json.get("id").asString
             val name = json.get("name").asString
 
@@ -231,16 +167,13 @@ class MateriaAuthenticator {
     private fun postJson(url: String, json: String): String {
         val request = Request.Builder().url(url).post(json.toRequestBody(jsonMediaType)).header("Accept", "application/json").build()
         client.newCall(request).execute().use {
-            val responseBody = it.body?.string()
+            val responseBody = it.body.string()
             if (!it.isSuccessful) {
-                println("--- API ERROR ---")
-                println("URL: $url")
-                println("Code: ${it.code}")
-                println("Response: $responseBody")
-                println("--- END API ERROR ---")
-                throw Exception("API Error $url: ${it.code}")
+                val service = java.net.URI(url).host
+                throw IllegalStateException("Ошибка авторизации $service (HTTP ${it.code}). Проверьте доступность сервиса и настройки аккаунта Xbox.")
             }
-            return responseBody!!
+            return responseBody
         }
     }
+
 }

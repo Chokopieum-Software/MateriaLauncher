@@ -63,7 +63,14 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             try {
                 val existingInfo = json.decodeFromString<VersionInfo>(jsonFile.readText())
                 log("Загружена информация о версии '${existingInfo.id}' из локального файла.")
-                return ensureLwjglOnLinuxArm(existingInfo)
+                if (existingInfo.inheritsFrom != null) {
+                    val resolved = fetchAndInheritVanillaInfo(versionIdToFind, task)
+                    jsonFile.writeText(json.encodeToString(resolved))
+                    return resolved
+                }
+                return existingInfo
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 log("Не удалось прочитать '${jsonFile.pathString}', файл будет перезапрошен. Ошибка: ${e.message}")
                 jsonFile.deleteIfExists()
@@ -80,8 +87,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             BuildType.VANILLA -> fetchAndInheritVanillaInfo(build.version, task)
         }
 
-        // 4. Обработка для Linux ARM
-        val finalInfo = ensureLwjglOnLinuxArm(resultInfo)
+        val finalInfo = resultInfo
 
         // 5. Сохраняем финальный JSON файл, используя ID из полученных данных
         val finalJsonFile = globalVersionsDir.resolve(finalInfo.id).resolve("${finalInfo.id}.json")
@@ -97,67 +103,6 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
 
         return finalInfo
     }
-
-    private fun ensureLwjglOnLinuxArm(originalInfo: VersionInfo): VersionInfo {
-        val osName = getOsName()
-        val arch = getArch()
-        val isLinuxArm = osName == "linux" && arch == "arm64"
-
-        if (!isLinuxArm) {
-            return originalInfo
-        }
-
-        log("Linux ARM detected. Ensuring LWJGL 3.3.3 is in metadata.")
-
-        val lwjglVersion = "3.3.3"
-        val lwjglArtifacts = listOf(
-            "lwjgl", "lwjgl-glfw", "lwjgl-jemalloc", "lwjgl-openal", "lwjgl-opengl", "lwjgl-stb", "lwjgl-tinyfd"
-        )
-        val nativeClassifier = "natives-linux-arm64"
-
-        val newLibraries = lwjglArtifacts.flatMap { artifactName ->
-            val mainLibName = "org.lwjgl:$artifactName:$lwjglVersion"
-            val nativeLibName = "org.lwjgl:$artifactName:$lwjglVersion:$nativeClassifier"
-
-            val mainArtifact = VersionInfo.Artifact(
-                path = "org/lwjgl/$artifactName/$lwjglVersion/$artifactName-$lwjglVersion.jar",
-                sha1 = "", // We'll rely on the downloader to validate if needed, or just download
-                size = 0,
-                url = "https://repo1.maven.org/maven2/org/lwjgl/$artifactName/$lwjglVersion/$artifactName-$lwjglVersion.jar"
-            )
-
-            val nativeArtifact = VersionInfo.Artifact(
-                path = "org/lwjgl/$artifactName/$lwjglVersion/$artifactName-$lwjglVersion-$nativeClassifier.jar",
-                sha1 = "",
-                size = 0,
-                url = "https://repo1.maven.org/maven2/org/lwjgl/$artifactName/$lwjglVersion/$artifactName-$lwjglVersion-$nativeClassifier.jar"
-            )
-
-            listOf(
-                // Library entry for the main JAR
-                VersionInfo.Library(
-                    name = mainLibName,
-                    downloads = VersionInfo.LibraryDownloads(artifact = mainArtifact)
-                ),
-                // Library entry for the native JAR
-                VersionInfo.Library(
-                    name = nativeLibName,
-                    downloads = VersionInfo.LibraryDownloads(
-                        classifiers = mapOf(nativeClassifier to nativeArtifact)
-                    ),
-                    natives = mapOf("linux" to "natives-linux-arm64")
-                )
-            )
-        }
-
-        // Filter out any existing LWJGL libraries to avoid conflicts
-        val filteredOriginalLibs = originalInfo.libraries.filterNot { it.name.startsWith("org.lwjgl") }
-
-        return originalInfo.copy(
-            libraries = filteredOriginalLibs + newLibraries
-        )
-    }
-
 
     private suspend fun fetchFabricProfile(build: MinecraftBuild, task: DownloadTask?): VersionInfo {
         val (gameVersion, loaderVersion) = parseFabricVersion(build.version)
@@ -177,12 +122,12 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             mainClass = fabricProfile.mainClass,
             libraries = (fabricProfile.libraries + vanillaInfo.libraries).distinctBy { it.name },
             arguments = mergeArguments(vanillaInfo.arguments, fabricProfile.arguments),
-            gameArguments = null
+            gameArguments = fabricProfile.gameArguments ?: vanillaInfo.gameArguments
         )
     }
 
     private suspend fun fetchForgeProfile(build: MinecraftBuild, task: DownloadTask?): VersionInfo {
-        val versionId = build.modloaderVersion ?: build.version
+        val versionId = build.version
         val (gameVersion, forgeVersion) = parseForgeVersion(versionId)
 
         task?.let { DownloadManager.updateTask(it.id, 0.06f, "Получение Vanilla $gameVersion") }
@@ -201,7 +146,8 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
 
         runForgeInstaller(installerJar, task)
 
-        val modernForgeJsonPath = globalVersionsDir.resolve(versionId).resolve("$versionId.json")
+        val actualVersionId = readInstallerVersion(installerJar)
+        val modernForgeJsonPath = globalVersionsDir.resolve(actualVersionId).resolve("$actualVersionId.json")
         val legacyForgeJsonPath = globalLibrariesDir.resolve("net/minecraftforge/forge/$gameVersion-$forgeVersion/forge-$gameVersion-$forgeVersion-client.json")
 
         val profileJsonPath = when {
@@ -218,7 +164,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             mainClass = versionProfile.mainClass,
             libraries = (versionProfile.libraries + vanillaInfo.libraries).distinctBy { it.name },
             arguments = mergeArguments(vanillaInfo.arguments, versionProfile.arguments),
-            gameArguments = null
+            gameArguments = versionProfile.gameArguments ?: vanillaInfo.gameArguments
         )
     }
 
@@ -240,12 +186,18 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             mainClass = quiltProfile.mainClass,
             libraries = (quiltProfile.libraries + vanillaInfo.libraries).distinctBy { it.name },
             arguments = mergeArguments(vanillaInfo.arguments, quiltProfile.arguments),
-            gameArguments = null
+            gameArguments = quiltProfile.gameArguments ?: vanillaInfo.gameArguments
         )
     }
 
     @Serializable
-    private data class InstallerProfile(val version: String)
+    private data class InstallerProfile(val version: String? = null, val versionInfo: VersionInfo? = null)
+
+    internal fun readInstallerVersion(installerJar: Path): String = ZipFile(installerJar.toFile()).use { zip ->
+        val entry = zip.getEntry("install_profile.json") ?: error("install_profile.json not found in installer")
+        val profile = json.decodeFromString<InstallerProfile>(zip.getInputStream(entry).bufferedReader().use { it.readText() })
+        profile.version ?: profile.versionInfo?.id ?: error("Installer profile has no version ID")
+    }
 
     private suspend fun fetchNeoForgeProfile(build: MinecraftBuild, task: DownloadTask?): VersionInfo {
         val (gameVersion, neoForgeVersion) = parseNeoForgeVersion(build.version)
@@ -264,14 +216,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
         }
 
         // Read the version ID from the installer's profile
-        val actualVersionId = withContext(Dispatchers.IO) {
-            ZipFile(installerJar.toFile()).use { zip ->
-                val entry = zip.getEntry("install_profile.json")
-                    ?: throw IllegalStateException("install_profile.json not found in NeoForge installer.")
-                val content = zip.getInputStream(entry).bufferedReader().readText()
-                json.decodeFromString<InstallerProfile>(content).version
-            }
-        }
+        val actualVersionId = withContext(Dispatchers.IO) { readInstallerVersion(installerJar) }
         log("Installer will create version: $actualVersionId")
 
         runForgeInstaller(installerJar, task) // NeoForge installer is compatible with Forge's
@@ -289,7 +234,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             mainClass = versionProfile.mainClass,
             libraries = (versionProfile.libraries + vanillaInfo.libraries).distinctBy { it.name },
             arguments = mergeArguments(vanillaInfo.arguments, versionProfile.arguments),
-            gameArguments = null
+            gameArguments = versionProfile.gameArguments ?: vanillaInfo.gameArguments
         )
     }
 
@@ -382,7 +327,8 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
         return json.decodeFromString(bytes.decodeToString())
     }
 
-    private fun mergeArguments(vanillaArgs: VersionInfo.Arguments?, otherArgs: VersionInfo.Arguments?): VersionInfo.Arguments {
+    internal fun mergeArguments(vanillaArgs: VersionInfo.Arguments?, otherArgs: VersionInfo.Arguments?): VersionInfo.Arguments? {
+        if (vanillaArgs == null && otherArgs == null) return null
         val game = (vanillaArgs?.game ?: emptyList()) + (otherArgs?.game ?: emptyList())
         val jvm = (vanillaArgs?.jvm ?: emptyList()) + (otherArgs?.jvm ?: emptyList())
         return VersionInfo.Arguments(game = game, jvm = jvm)
@@ -408,17 +354,4 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
         return if (parts.size == 2) parts[0] to parts[1] else throw IllegalArgumentException("Invalid NeoForge version string: $version")
     }
 
-    private fun getOsName(): String = when {
-        System.getProperty("os.name").lowercase().contains("win") -> "windows"
-        System.getProperty("os.name").lowercase().contains("mac") -> "osx"
-        else -> "linux"
-    }
-
-    // Эта функция — настоящий «сортировочный шляпа» для кода. Она пытается понять, в какой цифровой ГУЛАГ или элитный ЖК попала программа.
-    private fun getArch(): String = when (val arch = System.getProperty("os.arch").lowercase()) {
-        "aarch64" -> "arm64"
-        "x86_64", "amd64" -> "x64"
-        "x86" -> "x86"
-        else -> arch
-    }
 }

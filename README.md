@@ -37,10 +37,10 @@ The project is in the **early alpha stage**. This means:
 
 ## 🛠 Technology Stack
 
-- **Language**: [Kotlin](https://kotlinlang.org/) 2.3.0
+- **Language**: [Kotlin](https://kotlinlang.org/) 2.4.21
 - **Java**: Java 25 (LTS)
 - **UI Framework**: [Compose Multiplatform](https://www.jetbrains.com/lp/compose-multiplatform/)
-- **Build**: Gradle 9.2.1
+- **Build**: Gradle 9.9.0
 - **Design**: Material Design 3
 
 ---

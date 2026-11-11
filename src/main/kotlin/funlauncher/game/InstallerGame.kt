@@ -20,6 +20,8 @@ import java.net.UnknownHostException
 import kotlin.io.path.exists
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
@@ -43,6 +45,13 @@ class MinecraftInstaller(private val build: MinecraftBuild, private val buildMan
             logger.info("Starting launch for ${build.name} (${build.version})")
             logger.info("System: ${System.getProperty("os.name")} ${System.getProperty("os.arch")}, Java: $javaPath")
 
+            val javaManager = funlauncher.managers.JavaManager(pathManager)
+            if (javaManager.requiresJava8(build)) {
+                val selectedJava = javaManager.getJavaInfo(javaPath.ifBlank { "java" })
+                    ?: error("Не удалось определить версию выбранной Java. Для Forge ${build.version.substringBefore('-')} выберите Java 8.")
+                javaManager.validateJavaForBuild(build, selectedJava)
+            }
+
             // 1. Fetch Version Metadata
             DownloadManager.updateTask(task.id, 0.05f, "Получение метаданных...")
             val metadataFetcher = VersionMetadataFetcher(buildManager, pathManager)
@@ -50,15 +59,25 @@ class MinecraftInstaller(private val build: MinecraftBuild, private val buildMan
 
             // 2. Download Files
             DownloadManager.updateTask(task.id, 0.1f, "Загрузка файлов...")
-            val fileDownloader = FileDownloader(versionInfo, pathManager, buildManager)
+            val fileDownloader = FileDownloader(versionInfo, pathManager, buildManager, task.transferMeter)
             fileDownloader.downloadRequiredFiles(build) { progress, status ->
                 DownloadManager.updateTask(task.id, 0.1f + progress * 0.8f, status)
             }
 
             // 3. Create Payload and Launch
+            task.transferMeter.beginPhase(emptyMap(), estimateAvailable = false)
             DownloadManager.updateTask(task.id, 0.95f, "Запуск игры...")
             val gameLauncher = GameLauncher(versionInfo, build, pathManager)
-            val payload = gameLauncher.createLaunchPayload(account, javaPath, maxRamMb, javaArgs, envVars)
+            val launchAccount = if (account is funlauncher.auth.MicrosoftAccount) {
+                withContext(Dispatchers.IO) {
+                    synchronized(funlauncher.auth.MateriaAuthenticator.sessionLock) {
+                        val profile = funlauncher.auth.MateriaAuthenticator().refresh(account.uuid)
+                        account.copy(username = profile.name, accessToken = profile.accessToken, skinUrl = profile.skinUrl)
+                            .also { funlauncher.database.dao.AccountDao().saveMicrosoft(it) }
+                    }
+                }
+            } else account
+            val payload = gameLauncher.createLaunchPayload(launchAccount, javaPath, maxRamMb, javaArgs, envVars)
             
             val processBuilder = ProcessBuilder(payload.command)
                 .directory(File(payload.workDir))
@@ -67,8 +86,9 @@ class MinecraftInstaller(private val build: MinecraftBuild, private val buildMan
             // Добавляем переменные окружения
             processBuilder.environment().putAll(payload.environment)
 
-            logger.info("Starting process with command: ${payload.command.joinToString(" ")}")
+            logger.info("Starting Minecraft process")
             val process = withContext(Dispatchers.IO) {
+                coroutineContext.ensureActive()
                 processBuilder.start()
             }
 
@@ -77,6 +97,9 @@ class MinecraftInstaller(private val build: MinecraftBuild, private val buildMan
             delay(2000) // Даем увидеть 100%
             return process
 
+        } catch (e: CancellationException) {
+            logger.info("Launch cancelled for ${build.name}")
+            throw e
         } catch (e: Exception) {
             handleLaunchException(e)
         } finally {

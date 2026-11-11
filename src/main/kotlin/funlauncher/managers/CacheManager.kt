@@ -55,7 +55,9 @@ class CacheManager(
                 val cachedData = json.decodeFromString<T>(cacheFile.readText())
                 println("CacheManager: Успешно загружены данные из кэша для ключа: $key")
                 return cachedData
-            } catch (e: Exception) {
+            } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
                 println("CacheManager: Ошибка чтения или десериализации кэша для ключа: $key. Удаление файла. Ошибка: ${e.stackTraceToString()}")
                 cacheFile.delete()
             }
@@ -70,6 +72,8 @@ class CacheManager(
         } catch (e: CancellationException) {
             // This is not an error, but a normal cancellation of a coroutine.
             // We re-throw it to let the coroutine system handle it.
+            throw e
+        } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             println("CacheManager: Ошибка при выполнении fetcher() для ключа: $key. Ошибка: ${e.stackTraceToString()}")
@@ -116,6 +120,9 @@ class CacheManager(
                     val jsonString = response.bodyAsText()
                     val newEtag = response.headers[HttpHeaders.ETag]
 
+                    // Не подтверждаем новую версию кэша до успешного разбора и записи данных.
+                    processServerResponse(jsonString)
+
                     // 1. Сохраняем JSON в файл
                     metaCacheFile.writeText(jsonString)
 
@@ -125,7 +132,6 @@ class CacheManager(
                     }
                     
                     // 3. Разбираем и сохраняем отдельные файлы кэша для совместимости со старой логикой
-                    processServerResponse(jsonString)
 
                     println("CacheManager: Кэш успешно обновлен с сервера.")
                     true
@@ -139,6 +145,8 @@ class CacheManager(
                     false
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             println("CacheManager: Не удалось подключиться к серверу кэширования: ${e.message}. Будет использована резервная логика.")
             return false
@@ -197,12 +205,17 @@ class CacheManager(
         try {
             onStatusUpdate("Fetching $name metadata...")
             println("Fetching $name metadata from $url...")
-            val data = Network.client.get(url).body<ByteArray>()
+            val response = Network.client.get(url)
+            check(response.status.value in 200..299) { "HTTP ${response.status.value}: $name" }
+            val data = response.body<ByteArray>()
             file.writeBytes(data)
             println("Successfully cached $name metadata to ${file.absolutePath}")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             onStatusUpdate("Failed to fetch $name metadata.")
             println("Failed to fetch or cache $name metadata: ${e.message}")
+            throw e
         }
     }
 
@@ -238,8 +251,11 @@ class CacheManager(
                 File(cacheDir, "neoforge_versions_simple.json").writeText(json.encodeToString(it))
             }
 
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             println("CacheManager: Ошибка при разборе ответа сервера: ${e.message}")
+            throw e
         }
     }
 

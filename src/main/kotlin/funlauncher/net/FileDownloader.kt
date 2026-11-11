@@ -10,18 +10,39 @@ package funlauncher.net
 
 import funlauncher.BuildType
 import funlauncher.MinecraftBuild
+import funlauncher.game.rulesApply
+import funlauncher.game.nativeArch
+import funlauncher.game.mavenArtifactPath
 import funlauncher.game.AssetIndex
 import funlauncher.game.VersionInfo
 import funlauncher.managers.BuildManager
 import funlauncher.managers.PathManager
 import funlauncher.utils.Hashing
 import io.ktor.client.call.*
+import io.ktor.client.plugins.timeout
+import io.ktor.client.plugins.onDownload
 import io.ktor.client.request.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
+import java.io.IOException
+import java.net.URI
+import java.net.UnknownHostException
+import java.nio.channels.UnresolvedAddressException
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.*
+
+internal fun downloadFailure(url: String, description: String, cause: Exception): IOException {
+    val host = URI(url).host ?: url
+    val isDnsFailure = generateSequence<Throwable>(cause) { it.cause }
+        .any { it is UnresolvedAddressException || it is UnknownHostException }
+    val detail = if (isDnsFailure) {
+        "Не удалось определить IP-адрес сервера $host. Проверьте подключение к интернету, DNS и настройки VPN/прокси."
+    } else {
+        cause.message?.takeIf { it.isNotBlank() } ?: cause.javaClass.simpleName
+    }
+    return IOException("Не удалось скачать $description с $host. $detail", cause)
+}
 
 /**
  * Handles downloading of game files, including libraries and assets.
@@ -29,7 +50,8 @@ import kotlin.io.path.*
 class FileDownloader(
     private val versionInfo: VersionInfo,
     private val pathManager: PathManager,
-    private val buildManager: BuildManager
+    private val buildManager: BuildManager,
+    private val transferMeter: TransferMeter = TransferMeter()
 ) {
     private val client = Network.client
     private val json = Network.json
@@ -39,8 +61,8 @@ class FileDownloader(
     private val globalLibrariesDir: Path = pathManager.getGlobalLibrariesDir()
 
     private val availableCores = Runtime.getRuntime().availableProcessors()
-    private val librarySemaphore = Semaphore(availableCores * 4)
-    private val assetSemaphore = Semaphore(availableCores * 8)
+    private val librarySemaphore = Semaphore(availableCores.coerceIn(2, 8))
+    private val assetSemaphore = Semaphore((availableCores * 2).coerceIn(4, 16))
 
     private fun log(message: String) = println("[FileDownloader] $message")
 
@@ -49,29 +71,51 @@ class FileDownloader(
         val gameVersionForJar = getGameVersionForJar(build)
         val clientJarPath = globalVersionsDir.resolve(gameVersionForJar).resolve("$gameVersionForJar.jar")
         versionInfo.downloads?.client?.let {
-            downloadFile(it.url, clientJarPath, "Client JAR")
+            transferMeter.beginPhase(mapOf(clientJarPath.toString() to it.size.takeIf { size -> size > 0 }))
+            downloadFile(it.url, clientJarPath, "Client JAR", it.size, it.sha1)
         } ?: log("Client JAR download URL not found for version ${versionInfo.id}, assuming it's provided by a modloader.")
-
 
         // 2. Download Libraries
         val libraries = versionInfo.libraries.filter { isRuleApplicable(it.rules ?: emptyList()) }
         val libCounter = AtomicInteger(0)
-        libraries.map { lib ->
-            CoroutineScope(Dispatchers.IO).async {
-                librarySemaphore.acquire()
-                try {
-                    downloadLibrary(lib)
-                } finally {
-                    librarySemaphore.release()
-                    val c = libCounter.incrementAndGet()
-                    onProgress(c.toFloat() / libraries.size * 0.5f, "Libs: ${lib.name.substringAfterLast(':')}")
+        val librarySizes = buildMap<String, Long?> {
+            for (lib in libraries) {
+                lib.downloads?.artifact?.let { artifact ->
+                    put(globalLibrariesDir.resolve(artifact.path).toString(), artifact.size.takeIf { it > 0 })
+                }
+                if (lib.downloads == null && lib.natives == null) {
+                    put(globalLibrariesDir.resolve(getArtifactPath(lib.name)).toString(), null)
+                }
+                lib.natives?.get(getOsName())?.replace("\${arch}", getArch())?.let { classifier ->
+                    val artifact = lib.downloads?.classifiers?.get(classifier)
+                    if (artifact != null) {
+                        put(globalLibrariesDir.resolve(artifact.path).toString(), artifact.size.takeIf { it > 0 })
+                    } else if (lib.downloads == null) {
+                        put(globalLibrariesDir.resolve(getArtifactPath(lib.name, classifier)).toString(), null)
+                    }
                 }
             }
-        }.awaitAll()
+        }
+        transferMeter.beginPhase(librarySizes)
+        coroutineScope {
+            libraries.map { lib ->
+                async(Dispatchers.IO) {
+                    librarySemaphore.acquire()
+                    try {
+                        downloadLibrary(lib)
+                        val c = libCounter.incrementAndGet()
+                        onProgress(c.toFloat() / libraries.size * 0.5f, "Libs: ${lib.name.substringAfterLast(':')}")
+                    } finally {
+                        librarySemaphore.release()
+                    }
+                }
+            }.awaitAll()
+        }
 
         // 3. Download Asset Index and Assets
         versionInfo.assetIndex?.let { assetIndexInfo ->
             val idxFile = globalAssetsDir.resolve("indexes").resolve("${assetIndexInfo.id}.json")
+            transferMeter.beginPhase(mapOf(idxFile.toString() to null))
             downloadFile(assetIndexInfo.url, idxFile, "Asset Index")
             val idx = json.decodeFromString<AssetIndex>(idxFile.readText())
             downloadAssetsInParallel(idx) { progress, status -> onProgress(0.5f + progress * 0.5f, status) }
@@ -85,136 +129,141 @@ class FileDownloader(
         lib.downloads?.artifact?.let { artifact ->
             val path = globalLibrariesDir.resolve(artifact.path)
             downloadFile(artifact.url, path, "Lib: ${lib.name}", artifact.size, artifact.sha1)
-        } ?: run {
-            // Если downloads == null (старые версии Minecraft)
+        }
+        // Only legacy entries without native artifacts need a Maven-coordinate fallback.
+        // A downloads block containing classifiers alone declares no main JAR.
+        if (lib.downloads == null && lib.natives == null) {
             val artifactPath = getArtifactPath(lib.name)
             val path = globalLibrariesDir.resolve(artifactPath)
             val url = (lib.url ?: defaultRepo) + artifactPath
-
-            try {
-                downloadFile(url, path, "Lib: ${lib.name}")
-            } catch (e: Exception) {
-                if (lib.natives != null) {
-                    log("Ignored missing main artifact for ${lib.name} because it has natives.")
-                } else {
-                    throw e
-                }
-            }
+            downloadFile(url, path, "Lib: ${lib.name}")
         }
 
         // Native artifact handling
         if (lib.natives != null) {
-            if (getOsName() == "linux" && getArch() == "arm64" && lib.name.startsWith("org.lwjgl")) {
-                // Force download only ARM64 natives for LWJGL on Linux ARM
-                val lwjglVersion = lib.name.split(":")[2]
-                val artifactName = lib.name.split(":")[1]
-                val classifier = "natives-linux-arm64"
-                val artifactPath = getArtifactPath("org.lwjgl:$artifactName:$lwjglVersion", classifier)
-                val path = globalLibrariesDir.resolve(artifactPath)
-                val url = (lib.url ?: defaultRepo) + artifactPath
-                downloadFile(url, path, "Native (ARM): ${lib.name}")
-            } else {
-                // Default native artifact logic for other OS/Arch
-                lib.natives.get(getOsName())?.let { classifierTemplate ->
-                    val classifier = classifierTemplate.replace("\${arch}", getArch())
-                    if (lib.downloads != null) {
-                        lib.downloads.classifiers?.get(classifier)?.let { nativeArtifact ->
-                            val path = globalLibrariesDir.resolve(nativeArtifact.path)
-                            downloadFile(nativeArtifact.url, path, "Native: ${lib.name}", nativeArtifact.size, nativeArtifact.sha1)
-                        }
-                    } else {
-                        // Legacy handling for old versions (1.5.2, etc.)
-                        val artifactPath = getArtifactPath(lib.name, classifier)
-                        val path = globalLibrariesDir.resolve(artifactPath)
-                        val url = (lib.url ?: defaultRepo) + artifactPath
-                        downloadFile(url, path, "Native: ${lib.name}")
+            // Select native artifacts from version metadata
+            lib.natives.get(getOsName())?.let { classifierTemplate ->
+                val classifier = classifierTemplate.replace("\${arch}", getArch())
+                if (lib.downloads != null) {
+                    lib.downloads.classifiers?.get(classifier)?.let { nativeArtifact ->
+                        val path = globalLibrariesDir.resolve(nativeArtifact.path)
+                        downloadFile(nativeArtifact.url, path, "Native: ${lib.name}", nativeArtifact.size, nativeArtifact.sha1)
                     }
+                } else {
+                    // Legacy handling for old versions (1.5.2, etc.)
+                    val artifactPath = getArtifactPath(lib.name, classifier)
+                    val path = globalLibrariesDir.resolve(artifactPath)
+                    val url = (lib.url ?: defaultRepo) + artifactPath
+                    downloadFile(url, path, "Native: ${lib.name}")
                 }
             }
+
         }
     }
 
     private suspend fun downloadAssetsInParallel(idx: AssetIndex, onProgress: (Float, String) -> Unit) {
         val assets = idx.objects.entries.toList()
         val counter = AtomicInteger(0)
-        assets.map { (_, asset) ->
-            CoroutineScope(Dispatchers.IO).async {
-                assetSemaphore.acquire()
-                try {
-                    val p = asset.hash.substring(0, 2)
-                    val path = globalAssetsDir.resolve("objects").resolve(p).resolve(asset.hash)
-                    downloadFile(
-                        "https://resources.download.minecraft.net/$p/${asset.hash}",
-                        path,
-                        "Asset",
-                        asset.size,
-                        asset.hash
-                    )
-                    val c = counter.incrementAndGet()
-                    if (c % 100 == 0) onProgress(c.toFloat() / assets.size, "Assets: $c/${assets.size}")
-                } finally {
-                    assetSemaphore.release()
+        transferMeter.beginPhase(assets.associate { (_, asset) ->
+            globalAssetsDir.resolve("objects").resolve(asset.hash.substring(0, 2))
+                .resolve(asset.hash).toString() to asset.size
+        })
+        coroutineScope {
+            assets.map { (_, asset) ->
+                async(Dispatchers.IO) {
+                    assetSemaphore.acquire()
+                    try {
+                        val p = asset.hash.substring(0, 2)
+                        val path = globalAssetsDir.resolve("objects").resolve(p).resolve(asset.hash)
+                        downloadFile(
+                            "https://resources.download.minecraft.net/$p/${asset.hash}",
+                            path,
+                            "Asset",
+                            asset.size,
+                            asset.hash
+                        )
+                        val c = counter.incrementAndGet()
+                        if (c % 100 == 0) onProgress(c.toFloat() / assets.size, "Assets: $c/${assets.size}")
+                    } finally {
+                        assetSemaphore.release()
+                    }
                 }
-            }
-        }.awaitAll()
+            }.awaitAll()
+        }
     }
 
     private suspend fun downloadFile(url: String, path: Path, desc: String, size: Long? = null, sha1: String? = null) {
+        currentCoroutineContext().ensureActive()
+        // Generated/loader metadata uses zero and blank hashes for unknown values.
+        val expectedSize = size?.takeIf { it > 0 }
+        val expectedSha1 = sha1?.trim()?.takeIf { it.isNotEmpty() }
         if (path.exists()) {
-            if (size != null && path.fileSize() != size) {
+            if (path.fileSize() == 0L || (expectedSize != null && path.fileSize() != expectedSize)) {
                 log("File $desc has wrong size. Deleting and redownloading.")
                 path.deleteIfExists()
-            } else if (sha1 != null && Hashing.getSha1(path) != sha1) {
+            } else if (expectedSha1 != null && !Hashing.getSha1(path).equals(expectedSha1, ignoreCase = true)) {
                 log("File $desc has wrong hash. Deleting and redownloading.")
                 path.deleteIfExists()
             } else {
+                transferMeter.complete(path.toString())
                 return // File is valid
             }
         }
-
 
         val maxRetries = 3
         val retryDelay = 3000L
 
         for (attempt in 1..maxRetries) {
+            currentCoroutineContext().ensureActive()
+            transferMeter.retry(path.toString(), expectedSize)
+            var lastReceived = 0L
             try {
                 log("Downloading $desc (attempt $attempt/$maxRetries)...")
                 path.parent.createDirectories()
-                val resp = client.get(url)
+                val resp = client.get(url) {
+                    onDownload { bytesReceived, _ ->
+                        transferMeter.received(path.toString(), (bytesReceived - lastReceived).coerceAtLeast(0))
+                        lastReceived = bytesReceived
+                    }
+                    timeout {
+                        // Large JARs may take longer than the metadata client's one-minute limit.
+                        requestTimeoutMillis = 10 * 60 * 1000L
+                        connectTimeoutMillis = 30_000L
+                        socketTimeoutMillis = 60_000L
+                    }
+                }
 
                 if (resp.status.value == 200) {
                     path.writeBytes(resp.body())
                     log("Successfully downloaded $desc")
                     // Verify after download
-                    if (size != null && path.fileSize() != size) {
+                    if (path.fileSize() == 0L || (expectedSize != null && path.fileSize() != expectedSize)) {
                         throw Exception("Downloaded file size mismatch")
                     }
-                    if (sha1 != null && Hashing.getSha1(path) != sha1) {
+                    if (expectedSha1 != null && !Hashing.getSha1(path).equals(expectedSha1, ignoreCase = true)) {
                         throw Exception("Downloaded file hash mismatch")
                     }
+                    transferMeter.complete(path.toString())
                     return
                 }
                 throw Exception("HTTP ${resp.status.value}")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
                 runCatching { path.deleteIfExists() }
-                log("Error downloading $desc from $url: ${e.message}")
+                val failure = downloadFailure(url, desc, e)
+                log("Error downloading $desc from $url: ${failure.message}")
                 if (attempt < maxRetries) {
                     delay(retryDelay)
                 } else {
-                    throw e
+                    throw failure
                 }
             }
         }
     }
 
-    private fun getArtifactPath(name: String, classifier: String? = null): String {
-        val parts = name.split(':')
-        val groupPath = parts[0].replace('.', '/')
-        val artifactName = parts[1]
-        val version = parts[2]
-        val classifierStr = if (classifier != null) "-$classifier" else ""
-        return "$groupPath/$artifactName/$version/$artifactName-$version$classifierStr.jar"
-    }
+    private fun getArtifactPath(name: String, classifier: String? = null): String = mavenArtifactPath(name, classifier)
 
     private fun getGameVersionForJar(build: MinecraftBuild): String = when (build.type) {
         BuildType.FABRIC -> build.version.split("-fabric-").first()
@@ -224,21 +273,7 @@ class FileDownloader(
         else -> versionInfo.id
     }
 
-    private fun isRuleApplicable(rules: List<VersionInfo.Rule>): Boolean {
-        if (rules.isEmpty()) return true
-        var finalAction = "allow" // Default to allow if no specific rule matches
-
-        for (rule in rules) {
-            val osRule = rule.os
-            if (osRule?.name == getOsName()) {
-                finalAction = rule.action
-            } else if (osRule == null) {
-                // Rule applies to all OS, but might be overridden by a more specific rule later
-                finalAction = rule.action
-            }
-        }
-        return finalAction == "allow"
-    }
+    private fun isRuleApplicable(rules: List<VersionInfo.Rule>): Boolean = rulesApply(rules, getOsName())
 
     private fun getOsName(): String = when {
         System.getProperty("os.name").lowercase().contains("win") -> "windows"
@@ -246,10 +281,5 @@ class FileDownloader(
         else -> "linux"
     }
 
-    private fun getArch(): String = when (val arch = System.getProperty("os.arch").lowercase()) {
-        "aarch64" -> "arm64"
-        "x86_64", "amd64" -> "x64"
-        "x86" -> "x86"
-        else -> arch
-    }
+    private fun getArch(): String = nativeArch()
 }
