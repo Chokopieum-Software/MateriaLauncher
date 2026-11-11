@@ -32,14 +32,18 @@ jobs:
           $expected = 'b7f75b8fc36286224803a67e1eea082f77c4eb8e67db8688131de45da0cd4b0bd1ae642975e1b92dbbb97a0d879f59e62b53deaca083ec0836a4de6091a8efb8'
           if ((Get-FileHash $archive -Algorithm SHA512).Hash -ne $expected) { throw 'JBR SDK checksum mismatch' }
 
-      - name: Set up JBR SDK 25.0.4.1
-        uses: actions/setup-java@v6.2.0
-        with:
-          distribution: jetbrains
-          java-version: '25.0.4.1'
-          java-package: jdk
-          jdk-file: ${{ runner.temp }}/jbrsdk.tar.gz
-
+      - name: Set up pinned JBR SDK
+        run: |
+          $sdkRoot = Join-Path $env:RUNNER_TEMP 'jbrsdk'
+          New-Item -ItemType Directory -Path $sdkRoot -Force | Out-Null
+          tar -xzf "$env:RUNNER_TEMP/jbrsdk.tar.gz" -C $sdkRoot
+          if ($LASTEXITCODE -ne 0) { throw 'JBR SDK extraction failed' }
+          $jdk = Get-ChildItem $sdkRoot -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'bin/javac.exe') } | Select-Object -First 1
+          if (!$jdk) { throw 'Full JBR SDK not found' }
+          "JAVA_HOME=$($jdk.FullName)" >> $env:GITHUB_ENV
+          (Join-Path $jdk.FullName 'bin') >> $env:GITHUB_PATH
+          & (Join-Path $jdk.FullName 'bin/java.exe') -version
+          if ($LASTEXITCODE -ne 0) { throw 'JBR SDK cannot start' }
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
