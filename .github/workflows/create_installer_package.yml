@@ -44,6 +44,17 @@ jobs:
           ./gradlew.bat --no-daemon test :core:test :ui-components:test createDistributable
           if ($LASTEXITCODE -ne 0) { throw 'Tests or application build failed' }
 
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-reports-${{ github.run_number }}
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Build Inno Setup installer
         run: |
           $iscc = Get-ChildItem $env:ProgramFiles, ${env:ProgramFiles(x86)} -Directory -Filter 'Inno Setup *' |

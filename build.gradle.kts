@@ -208,5 +208,6 @@ compose.resources {
 
 // Allow regression checks against the same trimmed runtime used by IDEA Run.
 tasks.withType<Test>().configureEach {
+    testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     providers.gradleProperty("testJavaExecutable").orNull?.let { executable = it }
 }
