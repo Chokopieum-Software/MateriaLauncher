@@ -9,7 +9,7 @@
 package ui.screens
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
@@ -69,24 +71,30 @@ fun AccountScreen(
         }
     }
 
-    val visibleState = remember { MutableTransitionState(false).apply { targetState = true } }
-    LaunchedEffect(visibleState.currentState) {
-        if (!visibleState.currentState && !visibleState.targetState) {
-            onDismiss()
-        }
-    }
+    var visible by remember { mutableStateOf(false) }
+    val opacity by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(250),
+        finishedListener = { if (!visible) onDismiss() },
+        label = "Account popup opacity"
+    )
+    LaunchedEffect(Unit) { visible = true }
+    val shadowPadding = 24.dp
+    val shadowPaddingPx = with(LocalDensity.current) { shadowPadding.roundToPx() }
 
     Popup(
         alignment = Alignment.TopStart,
-        offset = androidx.compose.ui.unit.IntOffset(16, 50),
-        onDismissRequest = { visibleState.targetState = false },
+        offset = androidx.compose.ui.unit.IntOffset(16 - shadowPaddingPx, 50 - shadowPaddingPx),
+        onDismissRequest = { visible = false },
         properties = PopupProperties(focusable = true, dismissOnClickOutside = true)
     ) {
         MaterialTheme(colorScheme = colorScheme) {
-            AnimatedVisibility(
-                visibleState = visibleState,
-                enter = fadeIn(animationSpec = tween(250)),
-                exit = fadeOut(animationSpec = tween(250))
+            // Measure the full popup from its first frame. AnimatedVisibility
+            // initially reports empty bounds, making the native WINDOW layer
+            // resize/reposition once when the account panel appears. Reserve
+            // shadow space too, so fading in cannot expand native draw bounds.
+            Box(
+                modifier = Modifier.padding(shadowPadding).graphicsLayer { alpha = opacity }
             ) {
                 Box(
                     modifier = Modifier

@@ -1,6 +1,19 @@
 @file:Suppress("DEPRECATION")
 import org.gradle.jvm.tasks.Jar
 import java.util.*
+import org.gradle.api.artifacts.transform.*
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.file.FileSystemLocation
+import org.gradle.api.provider.Provider
+import org.objectweb.asm.*
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+
+buildscript {
+    repositories { mavenCentral() }
+    dependencies { classpath("org.ow2.asm:asm:9.10.1") }
+}
 
 plugins {
     kotlin("jvm") version "2.4.21"
@@ -10,6 +23,72 @@ plugins {
 }
 
 val isTestBuild = project.hasProperty("testbuild")
+
+/**
+ * Skiko's Direct3D resize workaround renders synchronously inside reshape().
+ * WINDOW Compose layers resize while recording a picture, so this re-enters the
+ * same native PictureRecorder and crashes the VM. Schedule the existing frame
+ * dispatcher instead. Keep native popup windows (required above WebView2).
+ * Remove this transform once the upstream resize path no longer renders inline.
+ */
+abstract class SkikoResizeTransform : TransformAction<TransformParameters.None> {
+    @get:InputArtifact
+    abstract val inputArtifact: Provider<FileSystemLocation>
+
+    override fun transform(outputs: TransformOutputs) {
+        val input = inputArtifact.get().asFile
+        ZipFile(input).use { zip ->
+            val target = "org/jetbrains/skiko/SkiaLayer.class"
+            if (zip.getEntry(target) == null) {
+                outputs.file(input)
+                return
+            }
+            val writer = ClassWriter(ClassWriter.COMPUTE_MAXS)
+            var replacements = 0
+            ClassReader(zip.getInputStream(zip.getEntry(target)).use { it.readBytes() })
+                .accept(object : ClassVisitor(Opcodes.ASM9, writer) {
+                    override fun visitMethod(access: Int, name: String, descriptor: String,
+                                             signature: String?, exceptions: Array<out String>?): MethodVisitor {
+                        val delegate = super.visitMethod(access, name, descriptor, signature, exceptions)
+                        if (name != "reshape" || descriptor != "(IIII)V") return delegate
+                        return object : MethodVisitor(Opcodes.ASM9, delegate) {
+                            override fun visitMethodInsn(opcode: Int, owner: String, name: String,
+                                                         descriptor: String, isInterface: Boolean) {
+                                if (owner == "org/jetbrains/skiko/redrawer/Redrawer" &&
+                                    name == "renderImmediately" && descriptor == "()V") {
+                                    visitInsn(Opcodes.ICONST_0)
+                                    super.visitMethodInsn(opcode, owner, "needRender", "(Z)V", isInterface)
+                                    replacements++
+                                } else super.visitMethodInsn(opcode, owner, name, descriptor, isInterface)
+                            }
+                        }
+                    }
+                }, 0)
+            check(replacements == 1) {
+                "Skiko resize implementation changed; review SkikoResizeTransform before upgrading"
+            }
+            ZipOutputStream(outputs.file("resize-safe-${input.name}").outputStream()).use { out ->
+                zip.entries().asSequence().forEach { entry ->
+                    out.putNextEntry(ZipEntry(entry.name).apply { time = 0 })
+                    if (!entry.isDirectory) {
+                        if (entry.name == target) out.write(writer.toByteArray())
+                        else zip.getInputStream(entry).use { it.copyTo(out) }
+                    }
+                    out.closeEntry()
+                }
+            }
+        }
+    }
+}
+
+val artifactType = ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE
+dependencies.registerTransform(SkikoResizeTransform::class) {
+    from.attribute(artifactType, ArtifactTypeDefinition.JAR_TYPE)
+    to.attribute(artifactType, "materia-resize-safe-jar")
+}
+configurations.matching { it.name == "runtimeClasspath" || it.name == "testRuntimeClasspath" }.configureEach {
+    attributes.attribute(artifactType, "materia-resize-safe-jar")
+}
 
 fun fetchGitHash(): String {
     return try {
