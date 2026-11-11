@@ -1,0 +1,65 @@
+name: Windows installers
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      BUILD_SOURCE: GitHub Actions
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up JBR SDK 25
+        uses: actions/setup-java@v6.2.0
+        with:
+          distribution: jetbrains
+          java-version: '25'
+          java-package: jdk
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+
+      - name: Test and build application directory
+        run: |
+          ./gradlew.bat --no-daemon test :core:test :ui-components:test createDistributable
+          if ($LASTEXITCODE -ne 0) { throw 'Tests or application build failed' }
+
+      - name: Build Inno Setup installer
+        run: |
+          $iscc = Get-ChildItem $env:ProgramFiles, ${env:ProgramFiles(x86)} -Directory -Filter 'Inno Setup *' |
+            Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'ISCC.exe' } |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (!$iscc) { throw 'Inno Setup compiler not found' }
+          & $iscc installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed' }
+          if (!(Test-Path 'build/inno-setup/MateriaLauncher-Setup.exe')) { throw 'Installer missing' }
+          git diff --exit-code -- build.properties
+          if ($LASTEXITCODE -ne 0) { throw 'Build modified build.properties' }
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: materia-launcher-windows-x64-${{ github.run_number }}
+          path: |
+            build/inno-setup/*.exe
+          if-no-files-found: error
+          retention-days: 30

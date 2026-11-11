@@ -34,12 +34,12 @@ cd MateriaKraft-Launcher
 
 **Для Windows:**
 ```bash
-gradlew.bat packageDistributable
+gradlew.bat createDistributable
 ```
 
 **Для macOS и Linux:**
 ```bash
-./gradlew packageDistributable
+./gradlew createDistributable
 ```
 
 После успешного выполнения команды вы найдете готовые для запуска дистрибутивы в каталоге `build/compose/binaries/main/app/`.
@@ -54,3 +54,23 @@ gradlew.bat packageDistributable
 4. После изменения переменных окружения откройте новый терминал или перезапустите IDE.
 
 Проверка: `gradlew.bat --version`, затем `gradlew.bat build`. Упаковка каталога приложения: `gradlew.bat createDistributable`.
+
+## Установщик Windows и версии
+
+Единый источник версии — `build.properties`: сейчас `version=0.1.0` и
+`channel=Alpha`. Для первого стабильного релиза задайте `version=1.0.0` и
+`channel=Stable`. Повышайте числовую версию вручную перед распространением
+обновления. Gradle больше не изменяет этот файл. Номер сборки отдельно:
+`GITHUB_RUN_NUMBER` в CI, `Local` локально, либо `-PbuildNumber=...`.
+
+Установщик создаёт только Inno Setup 6+. После `gradlew.bat test createDistributable`
+выполните `ISCC.exe installer.iss`. Результат:
+`build/inno-setup/MateriaLauncher-Setup.exe`.
+
+GitHub Actions автоматически выполняет тесты и сборку при push, pull request
+и ручном запуске. Установщик доступен в Artifacts соответствующего запуска
+30 дней; публикации GitHub Release нет. Подробности и параметры переопределения
+версии приведены в `build.md`.
+
+Ранние экспериментальные пакеты `1.0.N` могут потребовать удаления перед
+установкой Alpha `0.x`, поскольку Windows считает их версию более высокой.

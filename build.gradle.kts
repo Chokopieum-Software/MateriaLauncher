@@ -1,9 +1,6 @@
 @file:Suppress("DEPRECATION")
 import org.gradle.jvm.tasks.Jar
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.util.*
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
     kotlin("jvm") version "2.4.21"
@@ -26,28 +23,24 @@ fun fetchGitHash(): String {
 }
 
 // --- Логика определения версии ---
-fun getVersionInfo(): Pair<String, String> {
-    val buildPropsFile = project.file("build.properties")
-    val buildProps = Properties()
-    if (buildPropsFile.exists()) {
-        FileInputStream(buildPropsFile).use { buildProps.load(it) }
-    }
-    
-    // Получаем текущий номер и увеличиваем на 1
-    var buildNumber = buildProps.getProperty("buildNumber", "0").toInt()
-    buildNumber++
-    
-    // Сохраняем обновленный номер
-    buildProps.setProperty("buildNumber", buildNumber.toString())
-    FileOutputStream(buildPropsFile).use { buildProps.store(it, "Auto-incremented by Gradle") }
-    
-    // Версию можно задать в build.properties (version=1.0.0), иначе будет "1.0.0" по умолчанию
-    val version = buildProps.getProperty("version", "1.0.0")
-    
-    return Pair(version, buildNumber.toString())
+val buildProps = Properties().apply {
+    project.file("build.properties").inputStream().use { load(it) }
 }
-
-val (appVersion, appBuildNumber) = getVersionInfo()
+val appVersion = providers.gradleProperty("appVersion")
+    .getOrElse(buildProps.getProperty("version"))
+require(appVersion.matches(Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)"))) {
+    "appVersion must be MAJOR.MINOR.PATCH without leading zeroes"
+}
+val versionParts = appVersion.split('.').map { it.toIntOrNull() }
+require(versionParts[0] in 0..255 && versionParts[1] in 0..255 &&
+    versionParts[2] in 0..65535 && versionParts.any { it != 0 }) {
+    "appVersion must be Windows-compatible (255.255.65535 maximum, greater than zero)"
+}
+val appBuildNumber = providers.gradleProperty("buildNumber")
+    .orElse(providers.environmentVariable("GITHUB_RUN_NUMBER"))
+    .getOrElse("Local")
+val buildSource = providers.environmentVariable("BUILD_SOURCE").getOrElse("Local")
+val releaseChannel = buildProps.getProperty("channel", "Stable")
 val gitHash = fetchGitHash()
 
 group = "org.chokopieum.software"
@@ -118,12 +111,7 @@ compose.desktop {
 
         nativeDistributions {
             packageName = "materia-launcher"
-            val osName = System.getProperty("os.name")
-            if (osName.lowercase(Locale.getDefault()).contains("win")) {
-                packageVersion = "1.0.$appBuildNumber"
-            } else {
-                packageVersion = appVersion
-            }
+            packageVersion = appVersion
             description = "Modern launcher for Minecraft"
             vendor = "Chokopieum Software"
             copyright = "© 2025 Chokopieum Software"
@@ -133,13 +121,9 @@ compose.desktop {
 
             includeAllModules = true
 
-            // Собираем только EXE для Windows со встроенной JDK
-            targetFormats(TargetFormat.Exe, TargetFormat.Msi)
+            // Installers are built by Inno Setup from createDistributable output.
 
             windows {
-                menu = true
-                shortcut = true
-                upgradeUuid = "019b375c-3319-7eec-8098-e50668c43b5a"
                 if (isTestBuild) {
                     console = true
                 }
@@ -184,13 +168,20 @@ val generateCoverIndex by tasks.registering {
 
 tasks.named<Copy>("processResources") {
     dependsOn(generateCoverIndex)
+    inputs.property("appVersion", appVersion)
+    inputs.property("appBuildNumber", appBuildNumber)
+    inputs.property("buildSource", buildSource)
+    inputs.property("gitHash", gitHash)
+    inputs.property("isTestBuild", isTestBuild)
+    inputs.property("releaseChannel", releaseChannel)
     from(coverFiles) { into("covers") }
     from(layout.buildDirectory.dir("generated/coverResources"))
     doLast {
         val props = Properties()
         props.setProperty("version", appVersion)
+        props.setProperty("channel", releaseChannel)
         props.setProperty("buildNumber", appBuildNumber)
-        props.setProperty("buildSource", "Local")
+        props.setProperty("buildSource", buildSource)
         props.setProperty("gitHash", gitHash)
         props.setProperty("isTestBuild", isTestBuild.toString())
 

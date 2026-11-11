@@ -88,7 +88,8 @@ object AppInfo {
         } catch (e: Exception) {
             // Файл может отсутствовать в IDE, это нормально
         }
-        version = props.getProperty("version", "Dev")
+        version = listOf(props.getProperty("version", "Dev"), props.getProperty("channel", ""))
+            .filter { it.isNotBlank() && it != "Stable" }.joinToString(" ")
         buildNumber = props.getProperty("buildNumber", "Local")
         buildSource = props.getProperty("buildSource", "IDE")
         gradleVersion = props.getProperty("gradleVersion", "N/A")
