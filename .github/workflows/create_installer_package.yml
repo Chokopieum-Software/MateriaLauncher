@@ -47,10 +47,21 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install Inno Setup
+      - name: Install pinned Inno Setup 7.1.1
         run: |
-          choco install innosetup -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.1-x64.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -OutFile $installer
+          $expected = '8a5a6711c3766a6e5fb74f280ba0e3551e719ce94538d901fdbd1f8f9920b3f0'
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne $expected) { throw 'Inno Setup checksum mismatch' }
+          $installDir = Join-Path $env:RUNNER_TEMP 'InnoSetup7'
+          $process = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$installDir`"" -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Inno Setup installation failed: $($process.ExitCode)" }
+          $iscc = Join-Path $installDir 'ISCC.exe'
+          if (!(Test-Path $iscc)) { throw 'Inno Setup 7 compiler missing' }
+          $version = (& $iscc --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch '\b7\.1\.1\b') { throw "Unexpected Inno Setup version: $version" }
+          Write-Host "Using Inno Setup $version at $iscc"
+          "INNO_ISCC=$iscc" >> $env:GITHUB_ENV
 
       - name: Test and build application directory
         run: |
@@ -81,10 +92,8 @@ jobs:
 
       - name: Build Inno Setup installer
         run: |
-          $iscc = Get-ChildItem $env:ProgramFiles, ${env:ProgramFiles(x86)} -Directory -Filter 'Inno Setup *' |
-            Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'ISCC.exe' } |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (!$iscc) { throw 'Inno Setup compiler not found' }
+          $iscc = $env:INNO_ISCC
+          if (!$iscc -or !(Test-Path $iscc)) { throw 'Pinned Inno Setup 7 compiler not found' }
           & $iscc installer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed' }
           if (!(Test-Path 'build/inno-setup/MateriaLauncher-Setup.exe')) { throw 'Installer missing' }
