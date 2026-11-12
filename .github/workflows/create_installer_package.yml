@@ -65,7 +65,7 @@ jobs:
 
       - name: Test and build application directory
         run: |
-          ./gradlew.bat --no-daemon test :core:test :ui-components:test createDistributable
+          ./gradlew.bat --no-daemon test :core:test :ui-components:test :updater:mingwX64Test createDistributable
           if ($LASTEXITCODE -ne 0) { throw 'Tests or application build failed' }
 
       # Keep the name stable: installer-online.iss resolves it through nightly.link.

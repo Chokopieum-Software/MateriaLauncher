@@ -139,7 +139,8 @@ fun SettingsTab(
     saving: Boolean,
     saveError: String?,
     saved: Boolean,
-    onRetrySave: () -> Unit
+    onRetrySave: () -> Unit,
+    onExitForUpdate: () -> Unit
 ) {
     var currentSection by remember { mutableStateOf(SettingsSection.Appearance) }
     val accountViewModel = remember { AccountViewModel(accountManager, coroutineScope) }
@@ -220,7 +221,7 @@ fun SettingsTab(
                 SettingsSection.Appearance -> AppearanceSettings(currentSettings, save, saving)
                 SettingsSection.Launch -> LaunchSettings(currentSettings, save, onOpenJavaManager, accountViewModel, saving)
                 SettingsSection.Cache -> CacheSettings(cacheManager)
-                SettingsSection.About -> AboutScreen()
+                SettingsSection.About -> AboutScreen(onExitForUpdate)
             } }
         }
         }
@@ -477,7 +478,7 @@ private fun CacheSettings(cacheManager: CacheManager) {
 }
 
 @Composable
-private fun AboutScreen() {
+private fun AboutScreen(onExitForUpdate: () -> Unit) {
     var showTechInfo by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
@@ -514,6 +515,7 @@ private fun AboutScreen() {
                     }
                 }
             }
+            LauncherUpdateCard(onExitForUpdate)
             OutlinedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                 TextButton(onClick = { showTechInfo = !showTechInfo }, modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(16.dp)) {

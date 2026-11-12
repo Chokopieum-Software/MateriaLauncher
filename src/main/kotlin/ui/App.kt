@@ -60,7 +60,8 @@ fun App(
     appState: AppState, // appState is still needed for theme and some screen-specific logic
     pathManager: PathManager,
     cacheManager: CacheManager,
-    homeViewModel: HomeViewModel
+    homeViewModel: HomeViewModel,
+    onExitForUpdate: () -> Unit
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -105,7 +106,8 @@ fun App(
                                 saving = viewModel.settingsSaving,
                                 saveError = viewModel.settingsError,
                                 saved = viewModel.settingsSaved,
-                                onRetrySave = viewModel::retrySettingsSave
+                                onRetrySave = viewModel::retrySettingsSave,
+                                onExitForUpdate = onExitForUpdate
                             )
                         }
                     }

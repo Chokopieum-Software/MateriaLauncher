@@ -122,6 +122,33 @@ val buildSource = providers.environmentVariable("BUILD_SOURCE").getOrElse("Local
 val releaseChannel = buildProps.getProperty("channel", "Stable")
 val gitHash = fetchGitHash()
 
+// The native updater is shipped beside the launcher, including in both installers.
+afterEvaluate {
+    tasks.named("createDistributable") {
+        if (System.getProperty("os.name").startsWith("Windows")) {
+            dependsOn(":updater:bundleUpdater")
+            inputs.dir(project(":updater").layout.buildDirectory.dir("bundle"))
+        }
+        inputs.property("updateRunId", providers.environmentVariable("GITHUB_RUN_ID").getOrElse("Local"))
+        inputs.property("updateBranch", providers.environmentVariable("GITHUB_REF_NAME").getOrElse("Local"))
+        doLast {
+            val applicationDir = layout.buildDirectory.dir("compose/binaries/main/app/materia-launcher").get().asFile
+            if (System.getProperty("os.name").startsWith("Windows")) copy {
+                from(project(":updater").layout.buildDirectory.dir("bundle"))
+                into(applicationDir.resolve("updater"))
+            }
+            val metadata = Properties().apply {
+                setProperty("version", appVersion)
+                setProperty("buildNumber", appBuildNumber)
+                setProperty("runId", providers.environmentVariable("GITHUB_RUN_ID").getOrElse("Local"))
+                setProperty("branch", providers.environmentVariable("GITHUB_REF_NAME").getOrElse("Local"))
+                setProperty("commit", gitHash)
+            }
+            applicationDir.resolve("update.properties").outputStream().use { metadata.store(it, "Launcher update identity") }
+        }
+    }
+}
+
 group = "org.chokopieum.software"
 version = appVersion
 

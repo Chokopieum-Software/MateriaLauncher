@@ -361,7 +361,11 @@ private fun runApplication(isUiTest: Boolean) {
                                     appState = currentAppState,
                                     pathManager = globalPathManager,
                                     cacheManager = globalCacheManager,
-                                    homeViewModel = homeViewModel
+                                    homeViewModel = homeViewModel,
+                                    onExitForUpdate = {
+                                        viewModel.cancelScope()
+                                        exitApplication()
+                                    }
                                 )
                                 SideEffect {
                                     if (!isContentReady) isContentReady = true

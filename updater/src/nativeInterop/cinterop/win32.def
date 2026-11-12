@@ -1,0 +1,4 @@
+headers = updater.h
+headerFilter = updater.h
+package = updater.win32
+linkerOpts = -lwinhttp -lbcrypt -lcomctl32 -lshell32 -lgdi32
