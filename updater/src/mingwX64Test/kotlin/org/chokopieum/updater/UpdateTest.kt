@@ -14,18 +14,22 @@ class UpdateTest {
 
     @Test fun systemTarListsAndExtractsZipWithUnicodePath() {
         val fixture = platform.posix.getenv("MATERIA_UPDATER_TEST_ZIP")!!.toKString()
-        val root = "native-archive-тест-${mu_pid()}"
+        val root = "native-archive-тест-更新-${mu_pid()}"
         assertTrue(mu_mkdir(root) != 0)
         try {
             assertTrue(mu_mkdir("$root/staged") != 0)
-            assertTrue(mu_tar(fixture, root, "$root/names", 0) != 0)
-            assertTrue(mu_tar(fixture, root, "$root/details", 1) != 0)
             fun read(path: String): String {
                 val pointer = mu_read(path)!!
                 return try { pointer.toKString() } finally { mu_free(pointer) }
             }
+            fun tar(mode: Int, directory: String, log: String) {
+                val result = mu_tar(fixture, directory, log, mode)
+                assertTrue(result != 0, "tar mode=$mode failed (Win32 ${mu_error()}): ${read(log)}")
+            }
+            tar(0, root, "$root/names")
+            tar(1, root, "$root/details")
             validateListing(read("$root/names"), read("$root/details"))
-            assertTrue(mu_tar(fixture, "$root/staged", "$root/extract.log", 2) != 0)
+            tar(2, "$root/staged", "$root/extract.log")
             assertEquals("test-payload", read("$root/staged/app/test.jar"))
         } finally { mu_delete(root) }
     }

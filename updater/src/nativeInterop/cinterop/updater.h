@@ -235,16 +235,21 @@ static inline int mu_tar(const char *zip, const char *directory, const char *lis
     wchar_t system[32768], executable[32768]; GetSystemDirectoryW(system, 32768);
     swprintf(executable, 32768, L"%ls\\tar.exe", system);
     wchar_t *z = mu_wide(zip), *d = mu_wide(directory), *l = mu_wide(listing);
-    wchar_t command[32768];
-    if (mode == 2) swprintf(command, 32768, L"\"%ls\" -xf \"%ls\" -C \"%ls\" --no-same-owner --no-same-permissions", executable, z, d);
-    else swprintf(command, 32768, L"\"%ls\" %ls \"%ls\"", executable, mode == 1 ? L"-tvf" : L"-tf", z);
+    /* tar converts argv through the ANSI code page on some Windows versions.
+       Keep argv ASCII: open the ZIP with Win32 Unicode APIs and stream stdin;
+       set the Unicode extraction directory through CreateProcessW instead of -C. */
+    wchar_t command[32768], workingDirectory[32768];
+    DWORD directoryLength = GetFullPathNameW(d, 32768, workingDirectory, NULL);
+    if (!directoryLength || directoryLength >= 32768) { free(z); free(d); free(l); return 0; }
+    if (mode == 2) swprintf(command, 32768, L"\"%ls\" -xf - --no-same-owner --no-same-permissions", executable);
+    else swprintf(command, 32768, L"\"%ls\" %ls -", executable, mode == 1 ? L"-tvf" : L"-tf");
     SECURITY_ATTRIBUTES security = { sizeof(security), NULL, TRUE };
     HANDLE output = CreateFileW(l, GENERIC_WRITE, FILE_SHARE_READ, &security, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    HANDLE input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, 0, NULL);
+    HANDLE input = CreateFileW(z, GENERIC_READ, FILE_SHARE_READ, &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     STARTUPINFOW startup = {0}; startup.cb = sizeof(startup); startup.dwFlags = STARTF_USESTDHANDLES;
     startup.hStdOutput = output; startup.hStdError = output; startup.hStdInput = input;
     PROCESS_INFORMATION process = {0}; int ok = 0;
-    if (output != INVALID_HANDLE_VALUE && CreateProcessW(executable, command, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &startup, &process)) {
+    if (output != INVALID_HANDLE_VALUE && input != INVALID_HANDLE_VALUE && CreateProcessW(executable, command, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, workingDirectory, &startup, &process)) {
         if (WaitForSingleObject(process.hProcess, 300000) == WAIT_OBJECT_0) {
             DWORD code = 1; GetExitCodeProcess(process.hProcess, &code); ok = code == 0;
         } else { TerminateProcess(process.hProcess, 1); WaitForSingleObject(process.hProcess, 5000); }
