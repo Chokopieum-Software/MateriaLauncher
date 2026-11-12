@@ -86,6 +86,23 @@ fun main(args: Array<String>) {
         System.setProperty("compose.layers.type", "WINDOW")
     }
     if (funlauncher.auth.MicrosoftCallback.handleActivation(args)) return
+    val instanceLock = try {
+        SingleInstanceLock.acquire(PathManager.getDefaultAppDataDirectory())
+    } catch (e: Exception) {
+        e.printStackTrace()
+        JOptionPane.showMessageDialog(
+            null,
+            "Не удалось получить блокировку запуска лаунчера:\n${e.message}",
+            "Materia — ошибка запуска",
+            JOptionPane.ERROR_MESSAGE
+        )
+        exitProcess(1)
+    }
+    if (instanceLock == null) {
+        System.err.println("Materia is already running.")
+        exitProcess(0)
+    }
+    Runtime.getRuntime().addShutdownHook(Thread({ instanceLock.close() }, "launcher-instance-lock"))
     // Инициализируем сборщик логов при запуске приложения
     LogCollector.init()
 
