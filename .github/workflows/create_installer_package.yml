@@ -57,6 +57,17 @@ jobs:
           ./gradlew.bat --no-daemon test :core:test :ui-components:test createDistributable
           if ($LASTEXITCODE -ne 0) { throw 'Tests or application build failed' }
 
+      # Keep the name stable: installer-online.iss resolves it through nightly.link.
+      # Upload the directory contents directly, without an extra ZIP or parent folder.
+      - name: Upload online installer payload
+        if: github.ref == 'refs/heads/sunrise-dev'
+        uses: actions/upload-artifact@v4
+        with:
+          name: materia-launcher-app-windows-x64
+          path: build/compose/binaries/main/app/materia-launcher/
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -77,6 +88,11 @@ jobs:
           & $iscc installer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed' }
           if (!(Test-Path 'build/inno-setup/MateriaLauncher-Setup.exe')) { throw 'Installer missing' }
+          if ($env:GITHUB_REF -eq 'refs/heads/sunrise-dev') {
+            & $iscc installer-online.iss
+            if ($LASTEXITCODE -ne 0) { throw 'Online installer compilation failed (Inno Setup 7+ required)' }
+            if (!(Test-Path 'build/inno-setup/MateriaLauncher-Online-Setup.exe')) { throw 'Online installer missing' }
+          }
           git diff --exit-code -- build.properties
           if ($LASTEXITCODE -ne 0) { throw 'Build modified build.properties' }
       - name: Upload installers

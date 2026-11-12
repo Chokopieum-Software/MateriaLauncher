@@ -67,6 +67,32 @@ gradlew.bat createDistributable
 выполните `ISCC.exe installer.iss`. Результат:
 `build/inno-setup/MateriaLauncher-Setup.exe`.
 
+### Онлайн-установщик (Inno Setup 7+)
+
+Выполните `ISCC.exe installer-online.iss`. Результат:
+`build/inno-setup/MateriaLauncher-Online-Setup.exe`. Для его компиляции
+не нужны Gradle, JDK или локально собранный дистрибутив приложения.
+
+При установке он скачивает ZIP через nightly.link из последнего успешного
+запуска `create_installer_package.yml` в ветке `sunrise-dev`, распаковывает приложение
+в каталог установки и регистрирует его удаление, ярлыки и обработчик входа
+Microsoft. Java Runtime входит в скачиваемый дистрибутив. Нужен доступ к
+nightly.link и хранилищу артефактов GitHub.
+
+Workflow публикует для этого артефакт с постоянным именем
+`materia-launcher-app-windows-x64`: в корне ZIP находятся
+`materia-launcher.exe`, `app/` и `runtime/`. Сначала должен успешно завершиться
+хотя бы один запуск обновлённого workflow в `sunrise-dev`. Артефакты хранятся 30 дней;
+если доступного артефакта нет, установка завершится ошибкой загрузки.
+
+Адрес можно заменить при компиляции:
+`ISCC.exe /DArtifactUrl="https://example.org/materia-launcher.zip" installer-online.iss`.
+ZIP должен иметь ту же структуру. `AppVersion` обозначает версию самого
+онлайн-установщика из `build.properties`, а не версию скачиваемой сборки.
+`ExternalSize` в скрипте — предварительная оценка распакованного размера (1 ГиБ)
+для расчёта места и прогресса. Файлы устанавливаются штатным механизмом Inno Setup
+с поддержкой удаления; SHA-256 не закреплён, поскольку содержимое latest меняется.
+
 GitHub Actions автоматически выполняет тесты и сборку при push, pull request
 и ручном запуске. Установщик доступен в Artifacts соответствующего запуска
 30 дней; публикации GitHub Release нет. Подробности и параметры переопределения
