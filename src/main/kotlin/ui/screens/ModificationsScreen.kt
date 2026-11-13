@@ -149,7 +149,9 @@ fun ModificationsScreen(
     }
     pendingVersion?.takeIf { worldBuild == null }?.let { version ->
         InstallModificationDialog(
-            compatibleBuilds = viewModel.allBuilds.filter { ModificationInstaller.isCompatible(version, it, pendingType.installDir) },
+            builds = viewModel.allBuilds,
+            version = version,
+            directory = pendingType.installDir,
             onDismiss = { pendingVersion = null },
             onInstall = { build ->
                 if (pendingType == ModificationType.DATAPACKS) {

@@ -6,7 +6,8 @@ import java.nio.file.Path
 
 class ModificationInstaller(private val api: ModrinthApi, private val downloader: ModificationDownloader) {
     suspend fun install(version: Version, build: MinecraftBuild, directory: String, world: String? = null, onProgress: (Float, String) -> Unit) {
-        require(isCompatible(version, build, directory)) { "Версия несовместима со сборкой" }
+        val reasons = incompatibilityReasons(version, build, directory)
+        require(reasons.isEmpty()) { reasons.joinToString("; ") }
         require(directory != "datapacks" || world != null) { "Выберите мир для датапака" }
         val resolved = linkedMapOf<String, Version>()
         val visiting = mutableSetOf<String>()
@@ -16,7 +17,8 @@ class ModificationInstaller(private val api: ModrinthApi, private val downloader
                 val candidate = dependency.versionId?.let { api.getVersion(it) }
                     ?: dependency.projectId?.let { id -> api.getProjectVersions(id).firstOrNull { isCompatible(it, build, directory) } }
                     ?: error("Не удалось разрешить обязательную зависимость")
-                require(isCompatible(candidate, build, directory)) { "Несовместимая зависимость: "+candidate.name }
+                val dependencyReasons = incompatibilityReasons(candidate, build, directory)
+                require(dependencyReasons.isEmpty()) { "Несовместимая зависимость ${candidate.name}: ${dependencyReasons.joinToString("; ")}" }
                 resolve(candidate)
             }
             visiting.remove(current.id)
@@ -58,13 +60,23 @@ class ModificationInstaller(private val api: ModrinthApi, private val downloader
     }
 
     companion object {
-        fun isCompatible(version: Version, build: MinecraftBuild, directory: String): Boolean {
-            val minecraft = build.version.substringBefore("-fabric-").substringBefore("-forge-")
+        fun isCompatible(version: Version, build: MinecraftBuild, directory: String): Boolean =
+            incompatibilityReasons(version, build, directory).isEmpty()
+
+        fun incompatibilityReasons(version: Version, build: MinecraftBuild, directory: String): List<String> {
+            // Imported Fabric/Quilt profiles put the loader before the Minecraft version.
+            val profileVersion = Regex("^(?:fabric|quilt)-loader-[^-]+-(.+)$")
+                .matchEntire(build.version)?.groupValues?.get(1) ?: build.version
+            val minecraft = profileVersion.substringBefore("-fabric-").substringBefore("-forge-")
                 .substringBefore("-neoforge-").substringBefore("-quilt-")
-            if (minecraft !in version.gameVersions) return false
-            return when (directory) {
-                "resourcepacks", "shaderpacks", "datapacks" -> true
-                else -> version.loaders.any { it.equals(build.type.name, true) }
+            return buildList {
+                if (minecraft !in version.gameVersions) {
+                    add("Версия Minecraft не совпадает: в инстансе $minecraft; поддерживаются: ${version.gameVersions.joinToString().ifEmpty { "не указаны" }}")
+                }
+                if (directory !in setOf("resourcepacks", "shaderpacks", "datapacks") &&
+                    version.loaders.none { it.equals(build.type.name, true) }) {
+                    add("Загрузчик не совпадает: в инстансе ${build.type.name}; поддерживаются: ${version.loaders.joinToString().ifEmpty { "не указаны" }}")
+                }
             }
         }
     }
