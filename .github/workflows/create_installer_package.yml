@@ -63,10 +63,17 @@ jobs:
           Write-Host "Using Inno Setup $version at $iscc"
           "INNO_ISCC=$iscc" >> $env:GITHUB_ENV
 
-      - name: Test and build application directory
+      # WebView2 integration tests need a responsive desktop. Run them before
+      # native compilation and jlink rather than scheduling all tasks together.
+      - name: Test
         run: |
-          ./gradlew.bat --no-daemon test :core:test :ui-components:test :updater:mingwX64Test createDistributable
-          if ($LASTEXITCODE -ne 0) { throw 'Tests or application build failed' }
+          ./gradlew.bat --no-daemon test :core:test :ui-components:test :updater:mingwX64Test
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+
+      - name: Build application directory
+        run: |
+          ./gradlew.bat --no-daemon createDistributable
+          if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
 
       # Keep the name stable: installer-online.iss resolves it through nightly.link.
       # Upload the directory contents directly, without an extra ZIP or parent folder.
