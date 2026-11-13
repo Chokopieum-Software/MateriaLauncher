@@ -34,6 +34,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -49,8 +56,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import funlauncher.BuildType
 import funlauncher.MinecraftBuild
 import kotlinx.coroutines.delay
@@ -76,8 +81,13 @@ fun HomeScreen(
     viewModel: HomeViewModel
 ) {
     val filteredBuilds by rememberUpdatedState(viewModel.filteredBuilds)
-    var expandedBuild by remember { mutableStateOf<MinecraftBuild?>(null) }
-    
+
+    var draggedBuild by remember { mutableStateOf<MinecraftBuild?>(null) }
+    var pointerPosition by remember { mutableStateOf(Offset.Zero) }
+    var screenOrigin by remember { mutableStateOf(Offset.Zero) }
+    var trashBounds by remember { mutableStateOf<Rect?>(null) }
+    val isOverTrash = draggedBuild != null && trashBounds?.contains(pointerPosition) == true
+
     val lazyGridState = rememberLazyGridState()
     val reorderableState = rememberReorderableLazyGridState(lazyGridState) { from, to ->
         if (viewModel.searchQuery.isBlank()) {
@@ -85,7 +95,25 @@ fun HomeScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize()
+        .onGloballyPositioned { screenOrigin = it.positionInRoot() }
+        .pointerInput(viewModel) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull() ?: continue
+                    pointerPosition = screenOrigin + change.position
+                    if (change.previousPressed && !change.pressed) {
+                        val build = draggedBuild
+                        if (build != null && trashBounds?.contains(pointerPosition) == true) {
+                            viewModel.onDeleteBuildClick(build)
+                        }
+                        draggedBuild = null
+                    }
+                }
+            }
+        }
+    ) {
         Scaffold(
             containerColor = Color.Transparent
         ) { paddingValues ->
@@ -126,12 +154,12 @@ fun HomeScreen(
                                         )
                                     ) {
                                         val interactionSource = remember { MutableInteractionSource() }
-                                        val dragModifier = if (viewModel.searchQuery.isBlank()) {
-                                            Modifier.draggableHandle(interactionSource = interactionSource)
-                                        } else {
-                                            Modifier
-                                        }
-                                        
+                                        val dragModifier = Modifier.draggableHandle(
+                                            interactionSource = interactionSource,
+                                            onDragStarted = { draggedBuild = build },
+                                            onDragStopped = { draggedBuild = null }
+                                        )
+
                                         AnimatedBuildCard(
                                             build = build,
                                             isRunning = build == viewModel.runningBuild,
@@ -139,8 +167,8 @@ fun HomeScreen(
                                             isDragging = isDragging,
                                             onLaunchClick = { viewModel.onLaunchClick(build) },
                                             onOpenFolderClick = { viewModel.onOpenFolderClick(build) },
-                                            onSettingsClick = { expandedBuild = build },
-                                            onCardClick = { expandedBuild = build },
+                                            onSettingsClick = { viewModel.onSettingsBuildClick(build) },
+                                            onCardClick = { viewModel.onSettingsBuildClick(build) },
                                             index = filteredBuilds.indexOf(build),
                                             modifier = Modifier.animateItem(
                                                 placementSpec = spring(
@@ -158,105 +186,35 @@ fun HomeScreen(
             }
         }
 
-        expandedBuild?.let { build ->
-            Dialog(
-                onDismissRequest = { expandedBuild = null },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
+        AnimatedVisibility(
+            visible = draggedBuild != null,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Column(
+                modifier = Modifier.width(200.dp).height(88.dp)
+                    .onGloballyPositioned { trashBounds = it.boundsInRoot() },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)
             ) {
-                Surface(
-                    modifier = Modifier.padding(24.dp).widthIn(max = 1000.dp)
-                        .fillMaxWidth().heightIn(max = 760.dp).fillMaxHeight(),
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.background,
-                    shadowElevation = 16.dp
-                ) {
-                    ExpandedBuildScreenWrapper(
-                        build = build,
-                        viewModel = viewModel,
-                        onDismiss = { expandedBuild = null }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ExpandedBuildScreenWrapper(
-    build: MinecraftBuild,
-    viewModel: HomeViewModel,
-    onDismiss: () -> Unit
-) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            // Заголовок и действия окна настроек.
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Закрыть настройки сборки")
-                }
-                Spacer(Modifier.width(16.dp))
-                Text(build.name, style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                
-                // Кнопка удаления сборки (перенесена из карточки)
-                var showDeleteConfirm by remember { mutableStateOf(false) }
-                IconButton(onClick = { showDeleteConfirm = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Удалить сборку", tint = MaterialTheme.colorScheme.error)
-                }
-                
-                if (showDeleteConfirm) {
-                    AlertDialog(
-                        onDismissRequest = { showDeleteConfirm = false },
-                        title = { Text("Удалить сборку?") },
-                        text = { Text("Вы уверены, что хотите удалить сборку '${build.name}'? Это действие нельзя отменить.") },
-                        confirmButton = {
-                            Button(
-                                onClick = {
-                                    viewModel.onDeleteBuildClick(build)
-                                    showDeleteConfirm = false
-                                    onDismiss()
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Text("Удалить")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showDeleteConfirm = false }) {
-                                Text("Отмена")
-                            }
-                        }
-                    )
-                }
-            }
-
-            // Встраиваем экран настроек (без его собственного Scaffold/TopBar, только контент)
-            Box(modifier = Modifier.fillMaxSize().weight(1f)) {
-                BuildSettingsScreenWithoutDialog(
-                    build = build,
-                    globalSettings = viewModel.globalSettings,
-                    pathManager = viewModel.pathManager,
-                    onDismiss = onDismiss,
-                    onSave = { newName, newVersion, newType, newImagePath, javaPath, maxRam, javaArgs, envVars ->
-                        viewModel.onSaveBuildSettings(
-                            oldBuildName = build.name,
-                            newName = newName,
-                            newVersion = newVersion,
-                            newType = newType,
-                            newImagePath = newImagePath,
-                            javaPath = javaPath,
-                            maxRam = maxRam,
-                            javaArgs = javaArgs,
-                            envVars = envVars
-                        )
-                        onDismiss()
-                    }
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Перетащите сюда для удаления сборки",
+                    modifier = Modifier.size(36.dp),
+                    tint = if (isOverTrash) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Перетащите для удаления",
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    color = if (isOverTrash) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
+
     }
 }
 
@@ -273,7 +231,7 @@ fun TitleBarScope.TitleBarActions(
     val textColor = if (isDark) Color.White else LocalContentColor.current
     val backgroundColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)
     var showAccountPopup by remember { mutableStateOf(false) }
-    
+
     val colorScheme = if (isDark) darkColorScheme() else lightColorScheme()
 
     Box(modifier = Modifier.align(Alignment.Start)) {
@@ -434,7 +392,7 @@ private fun BuildCard(
         targetValue = if (isHovered) MaterialTheme.colorScheme.primary else Color.Transparent,
         animationSpec = tween(durationMillis = 200)
     )
-    
+
     val elevation by animateDpAsState(if (isDragging) 16.dp else if (isHovered) 12.dp else 4.dp)
 
     Card(
@@ -490,7 +448,7 @@ private fun BuildCard(
                 )
 
                 Spacer(Modifier.height(4.dp))
-                
+
                 Text(
                     text = formatBuildVersion(build),
                     style = MaterialTheme.typography.bodySmall,
@@ -523,7 +481,7 @@ private fun BuildCard(
                         contentPadding = PaddingValues(0.dp)
                     ) {
                         Icon(
-                            Icons.Default.Settings, 
+                            Icons.Default.Settings,
                             contentDescription = "Настройки"
                         )
                     }
@@ -538,7 +496,7 @@ private fun BuildCard(
                         contentPadding = PaddingValues(0.dp)
                     ) {
                         Icon(
-                            Icons.Default.Folder, 
+                            Icons.Default.Folder,
                             contentDescription = "Открыть папку"
                         )
                     }

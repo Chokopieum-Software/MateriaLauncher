@@ -198,8 +198,7 @@ fun SettingsTab(
         Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(section.title, style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface)
-            if (currentSettings.language != startupSettings.language ||
-                currentSettings.useBorderlessWindow != startupSettings.useBorderlessWindow) {
+            if (currentSettings.language != startupSettings.language) {
                 OutlinedCard(Modifier.fillMaxWidth()) {
                     Text("Некоторые изменения вступят в силу после перезапуска приложения.", Modifier.padding(16.dp))
                 }
@@ -286,24 +285,6 @@ private fun AppearanceSettings(
                             )
                         }
                     }
-                }
-            }
-        }
-        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Без системной рамки (требуется перезапуск)", modifier = Modifier.weight(1f))
-                    Switch(
-                        enabled = !saving,
-                        checked = currentSettings.useBorderlessWindow,
-                        onCheckedChange = {
-                            onSave(currentSettings.copy(useBorderlessWindow = it))
-
-                        }
-                    )
                 }
             }
         }

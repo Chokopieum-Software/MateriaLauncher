@@ -29,7 +29,6 @@ import kotlin.io.path.*
 class BuildManager(private val pathManager: PathManager) {
     private val launcherPath: Path = pathManager.getAppDataDirectory()
     private val instancesPath: Path = launcherPath.resolve("instances")
-    private val versionsPath: Path = launcherPath.resolve("versions")
     private val backgroundsPath: Path = launcherPath.resolve("backgrounds")
     private val buildDao = BuildDao()
     private val buildsMutex = Mutex()
@@ -224,22 +223,6 @@ class BuildManager(private val pathManager: PathManager) {
                 buildToUpdate.installPath
             }
 
-            if (buildToUpdate.version != newVersion || buildToUpdate.type != newType) {
-                val versionDir = versionsPath.resolve(buildToUpdate.version)
-                if (versionDir.exists()) {
-                    println("Version changed. Deleting old version directory: $versionDir")
-                    versionDir.deleteRecursively()
-                }
-                val vanillaPart = buildToUpdate.version.split("-fabric-").firstOrNull()
-                if (vanillaPart != null) {
-                    val vanillaDir = versionsPath.resolve(vanillaPart)
-                    if (vanillaDir.exists()) {
-                        println("Deleting old vanilla version directory: $vanillaDir")
-                        vanillaDir.deleteRecursively()
-                    }
-                }
-            }
-
             val updatedBuild = buildToUpdate.copy(
                 name = newName.trim(),
                 version = newVersion,
@@ -275,13 +258,6 @@ class BuildManager(private val pathManager: PathManager) {
         if (instancePath.exists()) {
             instancePath.deleteRecursively()
             println("Deleted instance directory: $instancePath")
-        }
-
-        val versionIdToDelete = buildToRemove.modloaderVersion ?: buildToRemove.version
-        val versionDir = versionsPath.resolve(versionIdToDelete)
-        if (versionDir.exists()) {
-            versionDir.deleteRecursively()
-            println("Deleted version directory: $versionDir")
         }
 
         buildToRemove.imagePath?.let {

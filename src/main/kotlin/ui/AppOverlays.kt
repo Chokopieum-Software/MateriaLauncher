@@ -8,7 +8,7 @@ import ui.dialogs.*
 import ui.screens.BuildSettingsScreen
 import ui.screens.JavaManagerWindow
 import ui.viewmodel.AppViewModel
-import ui.widgets.GameConsole
+import ui.windows.GameConsoleWindow
 
 @Composable
 fun AppOverlays(
@@ -43,15 +43,21 @@ fun AppOverlays(
             pathManager = pathManager,
             globalSettings = appState.settings,
             onDismiss = { viewModel.showBuildSettingsScreen = null },
+            onDelete = {
+                viewModel.showBuildSettingsScreen = null
+                viewModel.onDeleteBuildClick(build)
+            },
             onSave = { newName, newVersion, newType, newImagePath, javaPath, maxRam, javaArgs, envVars ->
                 viewModel.onSaveBuildSettings(newName, newVersion, newType, newImagePath, javaPath, maxRam, javaArgs, envVars)
             }
         )
     }
 
-    // This should be a separate component, but for now let's keep it here
     if (viewModel.showGameConsole) {
-        GameConsole(output = viewModel.gameOutput)
+        GameConsoleWindow(
+            onCloseRequest = { viewModel.showGameConsole = false },
+            gameOutput = viewModel.gameOutput
+        )
     }
 
     viewModel.showRamWarningDialog?.let { build ->

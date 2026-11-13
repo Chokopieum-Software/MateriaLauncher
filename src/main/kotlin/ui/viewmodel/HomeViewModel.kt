@@ -65,15 +65,6 @@ class HomeViewModel(
         appViewModel.onBuildsReordered(from, to)
     }
 
-    fun onSaveBuildSettings(oldBuildName: String, newName: String, newVersion: String, newType: funlauncher.BuildType, newImagePath: String?, javaPath: String?, maxRam: Int?, javaArgs: String?, envVars: String?) {
-        // We need to set the build to edit in AppViewModel first so it knows what to update
-        val buildToUpdate = appViewModel.buildList.find { it.name == oldBuildName }
-        if (buildToUpdate != null) {
-            appViewModel.showBuildSettingsScreen = buildToUpdate
-            appViewModel.onSaveBuildSettings(newName, newVersion, newType, newImagePath, javaPath, maxRam, javaArgs, envVars)
-        }
-    }
-
     fun onAccountSelected(account: Account) {
         appViewModel.onAccountSelected(account)
     }

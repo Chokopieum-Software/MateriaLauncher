@@ -63,8 +63,6 @@ jobs:
           Write-Host "Using Inno Setup $version at $iscc"
           "INNO_ISCC=$iscc" >> $env:GITHUB_ENV
 
-      # WebView2 integration tests need a responsive desktop. Run them before
-      # native compilation and jlink rather than scheduling all tasks together.
       - name: Test
         run: |
           ./gradlew.bat --no-daemon test :core:test :ui-components:test :updater:mingwX64Test

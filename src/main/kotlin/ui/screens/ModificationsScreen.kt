@@ -240,7 +240,6 @@ fun ModificationsScreen(
 
                 // Основной контент
                 Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    // A heavyweight WebView cannot follow Compose alpha transitions.
                     // Keep one details instance when the project metadata is refreshed.
                     val project = viewModel.selectedProject
                     key(project?.id) {

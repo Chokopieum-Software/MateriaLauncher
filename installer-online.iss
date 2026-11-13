@@ -1,4 +1,4 @@
-﻿; Online installer: downloads the latest successful sunrise-dev artifact at install time.
+; Online installer: downloads the latest successful sunrise-dev artifact at install time.
 #if Ver < EncodeVer(7, 0, 0)
   #error This script requires Inno Setup 7 or newer.
 #endif
@@ -61,8 +61,6 @@ Name: "authprotocol"; Description: "{cm:RegisterAuthProtocol}"; GroupDescription
 [CustomMessages]
 english.RegisterAuthProtocol=Register the Microsoft sign-in URI handler
 russian.RegisterAuthProtocol=Зарегистрировать URI для входа через Microsoft
-english.WebView2Missing=Microsoft Edge WebView2 Runtime was not found. HTML descriptions of mods may be unavailable until you install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/. Installation will continue.
-russian.WebView2Missing=Microsoft Edge WebView2 Runtime не найден. HTML-описания модов могут быть недоступны до установки Evergreen Runtime с https://developer.microsoft.com/microsoft-edge/webview2/. Установка будет продолжена.
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\{#AuthScheme}"; ValueType: string; ValueName: ""; ValueData: "URL:Materia Microsoft login"; Tasks: authprotocol
@@ -89,33 +87,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [Code]
 const
-  WebView2ClientKey = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   AuthProtocolKey = 'Software\Classes\{#AuthScheme}';
-
-function HasWebView2At(Root: Integer): Boolean;
-var
-  Version: String;
-  PackedVersion: Int64;
-begin
-  Result := RegQueryStringValue(Root, WebView2ClientKey, 'pv', Version) and
-    StrToVersion(Version, PackedVersion) and (PackedVersion > 0);
-end;
-
-function InitializeSetup(): Boolean;
-var
-  Available: Boolean;
-begin
-  Available := HasWebView2At(HKCU32) or HasWebView2At(HKLM32);
-  if IsWin64 then
-    Available := Available or HasWebView2At(HKCU64) or HasWebView2At(HKLM64);
-  if not Available then
-  begin
-    Log('Microsoft Edge WebView2 Runtime not found; continuing installation.');
-    if not WizardSilent then
-      MsgBox(CustomMessage('WebView2Missing'), mbInformation, MB_OK);
-  end;
-  Result := True;
-end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var

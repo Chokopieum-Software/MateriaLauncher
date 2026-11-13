@@ -129,6 +129,7 @@ fun App(
             appState = appState,
             pathManager = pathManager
         )
+        StartupLauncherUpdateCheck(onExitForUpdate)
     }
 }
 

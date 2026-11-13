@@ -28,7 +28,7 @@ val isTestBuild = project.hasProperty("testbuild")
  * Skiko's Direct3D resize workaround renders synchronously inside reshape().
  * WINDOW Compose layers resize while recording a picture, so this re-enters the
  * same native PictureRecorder and crashes the VM. Schedule the existing frame
- * dispatcher instead. Keep native popup windows (required above WebView2).
+ * dispatcher instead.
  * Remove this transform once the upstream resize path no longer renders inline.
  */
 abstract class SkikoResizeTransform : TransformAction<TransformParameters.None> {
@@ -202,7 +202,6 @@ dependencies {
     implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.24.0")
     implementation("org.commonmark:commonmark-ext-autolink:0.24.0")
     implementation("org.jsoup:jsoup:1.21.2")
-    implementation("ca.weblite:webview:1.14.0")
     implementation("net.java.dev.jna:jna-platform:5.18.1")
     testImplementation(kotlin("test-junit"))
 }

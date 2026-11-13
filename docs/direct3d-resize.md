@@ -13,7 +13,7 @@ that resize re-enters the recorder before the outer recording completes.
 `SkikoResizeTransform` in `build.gradle.kts` changes only that invocation to
 `Redrawer.needRender(false)`. The existing frame dispatcher schedules the next
 frame after the current call returns. Bounds synchronization and validation stay
-in place, as do Direct3D and native popup windows above the heavyweight WebView2.
+in place. The workaround also protects explicit Direct3D configurations.
 Ordinary rendering is unchanged; resize rendering is deferred to the dispatcher.
 
 The transform applies to runtime and test runtime dependencies, including the
@@ -28,5 +28,5 @@ calling `renderImmediately`. It does not require creating a graphics device.
 Build with `gradlew.bat createDistributable test`. On the affected NVIDIA machine,
 remove `%APPDATA%\.MateriaLauncher\use_opengl.flag`, run the rebuilt distribution,
 and check startup, tooltips, menus, modal dialogs, resizing, DPI changes, and
-dialogs above HTML descriptions. This hardware check remains necessary: the
+dialogs above descriptions. This hardware check remains necessary: the
 regression test verifies scheduling, not the native NVIDIA driver behavior.

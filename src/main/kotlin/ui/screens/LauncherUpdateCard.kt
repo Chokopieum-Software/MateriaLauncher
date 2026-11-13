@@ -12,6 +12,66 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.slf4j.LoggerFactory
+
+/** Lives above the tabs so navigation never repeats the startup check. */
+@Composable
+internal fun StartupLauncherUpdateCheck(onExitForUpdate: () -> Unit) {
+    val installation = remember { LauncherUpdates.installation() }
+    val scope = rememberCoroutineScope()
+    var latest by remember { mutableStateOf<LauncherUpdate?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        if (installation != null) {
+            try {
+                latest = withContext(Dispatchers.IO) { LauncherUpdates.check(installation) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                LoggerFactory.getLogger("LauncherUpdates").warn("Startup update check failed", failure)
+            }
+        }
+    }
+
+    latest?.let { selected ->
+        AlertDialog(
+            onDismissRequest = { if (!busy) latest = null },
+            title = { Text("Доступно обновление Materia Launcher") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Доступна сборка ${selected.buildNumber} (${selected.commit.take(7)}). Обновлятор установит её и снова запустит лаунчер.")
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !busy, onClick = {
+                    busy = true
+                    error = null
+                    scope.launch {
+                        try {
+                            withContext(NonCancellable) {
+                                withContext(Dispatchers.IO) { LauncherUpdates.start(installation!!, selected) }
+                                onExitForUpdate()
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            error = failure.message ?: "Не удалось запустить обновлятор"
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }) { Text("Закрыть и обновить") }
+            },
+            dismissButton = {
+                TextButton(enabled = !busy, onClick = { latest = null }) { Text("Позже") }
+            }
+        )
+    }
+}
 
 @Composable
 internal fun LauncherUpdateCard(onExitForUpdate: () -> Unit) {

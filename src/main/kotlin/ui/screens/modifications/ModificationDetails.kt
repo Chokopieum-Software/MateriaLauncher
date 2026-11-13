@@ -90,7 +90,7 @@ fun ModificationDetails(
             if (isLoadingDetails && project.body.isBlank()) {
                 Text("Загрузка описания…")
             } else key(project.id) {
-                HtmlDescription(
+                MarkdownDescription(
                     markdown = project.body,
                     base = "https://modrinth.com/"+project.projectType+"/"+project.slug,
                     modifier = Modifier.fillMaxWidth().weight(1f)

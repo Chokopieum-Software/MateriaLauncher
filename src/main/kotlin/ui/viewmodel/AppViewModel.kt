@@ -255,6 +255,8 @@ class AppViewModel(
     }
 
     fun onLaunchClick(build: MinecraftBuild) {
+        if (isLaunchingBuildId != null) return
+
         if (currentAccount == null) {
             errorDialogMessage = "Сначала выберите аккаунт!"
             return

@@ -80,11 +80,6 @@ private lateinit var globalVersionMetadataFetcher: VersionMetadataFetcher
 
 @OptIn(ExperimentalResourceApi::class)
 fun main(args: Array<String>) {
-    // WebView2 uses a heavyweight child HWND. Compose overlays must be native
-    // owned windows to appear above it (including their modal scrim).
-    if (System.getProperty("os.name").startsWith("Windows", true)) {
-        System.setProperty("compose.layers.type", "WINDOW")
-    }
     if (funlauncher.auth.MicrosoftCallback.handleActivation(args)) return
     val instanceLock = try {
         SingleInstanceLock.acquire(PathManager.getDefaultAppDataDirectory())
@@ -122,8 +117,10 @@ fun main(args: Array<String>) {
                 System.setProperty("skiko.renderApi", "OPENGL")
                 println("Using render API: OPENGL (Fallback via flag)")
             } else {
-                System.setProperty("skiko.renderApi", "DIRECT3D")
-                println("Using render API: DIRECT3D (Default for Windows)")
+                // Avoid unsupported DirectX12 initialization; allow an explicit renderer override.
+                val renderApi = System.getProperty("skiko.renderApi") ?: "OPENGL"
+                System.setProperty("skiko.renderApi", renderApi)
+                println("Using render API: $renderApi (Windows)")
             }
         }
 
