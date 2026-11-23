@@ -18,7 +18,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import funlauncher.BuildType
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.window.DialogProperties
+import funlauncher.net.ModificationInstaller
 import funlauncher.MinecraftBuild
 import ui.widgets.ImageLoader
 
@@ -27,52 +32,55 @@ import ui.widgets.ImageLoader
 fun BuildSelectionDialog(
     builds: List<MinecraftBuild>,
     onDismissRequest: () -> Unit,
+    selectedBuild: MinecraftBuild? = null,
+    version: funlauncher.net.Version? = null,
+    directory: String = "",
     onBuildSelected: (MinecraftBuild?) -> Unit
 ) {
-    Dialog(onDismissRequest = onDismissRequest) {
+    val candidates = remember(builds.toList(), version, directory) {
+        builds.map { build ->
+            build to (version?.let { ModificationInstaller.incompatibilityReasons(it, build, directory) } ?: emptyList())
+        }.sortedBy { it.second.isNotEmpty() }
+    }
+    Dialog(onDismissRequest = onDismissRequest, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth(0.9f).fillMaxHeight(0.8f)
+            modifier = Modifier.widthIn(max = 960.dp).fillMaxWidth(0.9f).fillMaxHeight(0.8f)
         ) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                 Text(
-                    text = "Выберите сборку для фильтрации",
+                    text = "Выберите сборку",
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 180.dp),
+                    columns = GridCells.Adaptive(minSize = 220.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    item {
-                        Card(
-                            onClick = { onBuildSelected(null) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1f)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Не выбрана", style = MaterialTheme.typography.titleMedium)
-                            }
+                    items(candidates, key = { it.first.name }) { (build, reasons) ->
+                        BuildSelectionCard(build, selected = build == selectedBuild, reasons = reasons) {
+                            onBuildSelected(build)
                         }
                     }
-                    items(builds) { build ->
-                        BuildSelectionCard(build = build, onClick = { onBuildSelected(build) })
-                    }
                 }
-                
+                if (builds.isEmpty()) {
+                    Text("Пока нет созданных сборок", style = MaterialTheme.typography.bodyMedium)
+                } else if (version != null && candidates.none { it.second.isEmpty() }) {
+                    Text("Нет совместимых сборок", color = MaterialTheme.colorScheme.error)
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                Button(
-                    onClick = onDismissRequest,
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text("Закрыть")
+                Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (version == null && selectedBuild != null) {
+                        TextButton(onClick = { onBuildSelected(null) }) { Text("Сбросить выбор") }
+                    }
+                    Button(onClick = onDismissRequest) { Text("Закрыть") }
                 }
             }
         }
@@ -81,18 +89,26 @@ fun BuildSelectionDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BuildSelectionCard(
+private fun BuildSelectionCard(
     build: MinecraftBuild,
+    selected: Boolean,
+    reasons: List<String>,
     onClick: () -> Unit
 ) {
     var coverSize by remember { mutableStateOf(IntSize.Zero) }
     val painter = ImageLoader.rememberImagePainter(build.imagePath, coverSize)
 
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
     Card(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        enabled = reasons.isEmpty(),
+        interactionSource = interaction,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(2.dp, if (selected || hovered) MaterialTheme.colorScheme.primary else Color.Transparent),
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (hovered) 12.dp else 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxWidth().aspectRatio(16 / 9f).onSizeChanged { coverSize = it }) {
@@ -113,7 +129,7 @@ fun BuildSelectionCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp)
+                    .padding(16.dp)
             ) {
                 Text(
                     text = build.name,
@@ -123,35 +139,16 @@ fun BuildSelectionCard(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = formatBuildVersion(build),
+                    text = "Minecraft ${ModificationInstaller.minecraftVersion(build)} · ${build.type.name}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                reasons.forEach { reason ->
+                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
             }
-        }
-    }
-}
-
-private fun formatBuildVersion(build: MinecraftBuild): String {
-    return when (build.type) {
-        BuildType.VANILLA -> build.version
-        BuildType.FABRIC -> {
-            val parts = build.version.split("-fabric-")
-            if (parts.size == 2) "${parts[0]} - ${parts[1]}" else build.version
-        }
-        BuildType.FORGE -> {
-            val parts = build.version.split("-forge-")
-            if (parts.size == 2) "${parts[0]} - ${parts[1]}" else build.version
-        }
-        BuildType.QUILT -> {
-            val parts = build.version.split("-quilt-")
-            if (parts.size == 2) "${parts[0]} - ${parts[1]}" else build.version
-        }
-        BuildType.NEOFORGE -> {
-            val parts = build.version.split("-neoforge-")
-            if (parts.size == 2) "${parts[0]} - ${parts[1]}" else build.version
         }
     }
 }

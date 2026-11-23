@@ -50,7 +50,11 @@ fun FilterPanel(
             .verticalScroll(rememberScrollState())
     ) {
 
-        Surface(
+        val build = viewModel.selectedBuild
+        if (build != null) {
+            Text("Minecraft ${funlauncher.net.ModificationInstaller.minecraftVersion(build)} · ${build.type.name}",
+                style = MaterialTheme.typography.titleSmall)
+        } else Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
             tonalElevation = 2.dp,
@@ -160,6 +164,7 @@ fun FilterPanel(
 
         Spacer(Modifier.height(16.dp))
 
+        if (build != null) return@Column
         Row(
             modifier = Modifier.fillMaxWidth().clickable {
                 viewModel.loadersExpanded = !viewModel.loadersExpanded

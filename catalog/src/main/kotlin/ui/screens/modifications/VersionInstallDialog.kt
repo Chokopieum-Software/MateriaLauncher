@@ -16,6 +16,9 @@ import funlauncher.net.Version
 @Composable
 fun VersionInstallDialog(
     versions: List<Version>,
+    addToCart: Boolean,
+    loading: Boolean,
+    error: String?,
     onDismissRequest: () -> Unit,
     onInstallClick: (Version) -> Unit
 ) {
@@ -33,17 +36,30 @@ fun VersionInstallDialog(
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
-                if (versions.isEmpty()) {
+                if (loading) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                } else if (error != null) {
+                    Text(error, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                } else if (versions.isEmpty()) {
                     Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         Text("Нет подходящих версий.")
                     }
                 } else {
+                    if (addToCart) {
+                        val latest = androidx.compose.runtime.remember(versions) {
+                            versions.maxBy { runCatching { java.time.Instant.parse(it.datePublished) }.getOrDefault(java.time.Instant.MIN) }
+                        }
+                        Button(onClick = { onInstallClick(latest) }) {
+                            Text("Добавить последнюю версию · ${latest.versionNumber}")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
                     LazyColumn(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(versions) { version ->
-                            DialogVersionCard(version, onInstallClick)
+                            DialogVersionCard(version, addToCart, onInstallClick)
                         }
                     }
                 }
@@ -62,7 +78,7 @@ fun VersionInstallDialog(
 }
 
 @Composable
-private fun DialogVersionCard(version: Version, onInstallClick: (Version) -> Unit) {
+private fun DialogVersionCard(version: Version, addToCart: Boolean, onInstallClick: (Version) -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -89,7 +105,7 @@ private fun DialogVersionCard(version: Version, onInstallClick: (Version) -> Uni
                 onClick = { onInstallClick(version) },
                 modifier = Modifier.align(Alignment.End)
             ) {
-                Text("Установить")
+                Text(if (addToCart) "В корзину" else "Установить")
             }
         }
     }

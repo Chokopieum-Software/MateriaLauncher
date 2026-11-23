@@ -35,6 +35,9 @@ class ModificationInstallerTest {
     }
 
     @Test fun rejectsWrongLoaderAndVanillaEvenWhenMinecraftMatches() {
+        val vanilla = MinecraftBuild("Vanilla", "1.21.11", BuildType.VANILLA, "unused")
+        assertTrue(ModificationInstaller.isCompatible(modVersion(loader = "fabric"), vanilla, ""))
+        assertFalse(ModificationInstaller.isCompatible(modVersion(minecraft = "1.20"), vanilla, ""))
         for (type in listOf(BuildType.FORGE, BuildType.NEOFORGE, BuildType.VANILLA)) {
             val build = MinecraftBuild("Test", "1.21.11", type, "unused")
             assertFalse(ModificationInstaller.isCompatible(modVersion(), build, "mods"))
@@ -60,6 +63,17 @@ class ModificationInstallerTest {
         assertEquals(1, ModificationInstaller.incompatibilityReasons(wrongBoth, build, "resourcepacks").size)
         assertEquals(2, ModificationInstaller.incompatibilityReasons(
             modVersion().copy(gameVersions = emptyList(), loaders = emptyList()), build, "mods").size)
+    }
+
+    @Test fun quiltDependenciesPreferQuiltAndAllowFabricForTheSameMinecraftVersion() {
+        val quilt = MinecraftBuild("quilt", "1.21.11-quilt-0.20.0", BuildType.QUILT, "unused")
+        val fabricLibrary = modVersion(loader = "fabric")
+        val quiltLibrary = modVersion(loader = "quilt")
+        val versions = listOf(modVersion(loader = "forge"), modVersion(minecraft = "1.21"), fabricLibrary)
+        assertEquals(fabricLibrary, ModificationInstaller.selectDependency(versions, quilt, "mods"))
+        assertEquals(quiltLibrary, ModificationInstaller.selectDependency(versions + quiltLibrary, quilt, "mods"))
+        assertNull(ModificationInstaller.selectDependency(versions.take(2), quilt, "mods"))
+        assertNull(ModificationInstaller.selectDependency(listOf(quiltLibrary), quilt.copy(type = BuildType.FABRIC), "mods"))
     }
 
     @Test fun rejectsEscapingPaths() {

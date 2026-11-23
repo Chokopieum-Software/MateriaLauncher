@@ -19,7 +19,7 @@ import funlauncher.net.Hit
 import ui.widgets.ImageLoader
 
 @Composable
-fun ModificationCard(hit: Hit, onClick: () -> Unit) {
+fun ModificationCard(hit: Hit, installEnabled: Boolean, onInstall: () -> Unit, onClick: () -> Unit) {
     val painter = ImageLoader.rememberImagePainterFromUrl(hit.iconUrl)
 
     Card(
@@ -63,6 +63,8 @@ fun ModificationCard(hit: Hit, onClick: () -> Unit) {
                     maxLines = 2
                 )
             }
+            Spacer(Modifier.width(12.dp))
+            OutlinedButton(enabled = installEnabled, onClick = onInstall) { Text("Установить") }
         }
     }
 }

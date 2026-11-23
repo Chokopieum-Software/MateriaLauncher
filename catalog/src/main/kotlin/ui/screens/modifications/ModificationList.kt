@@ -17,7 +17,9 @@ import funlauncher.net.SearchResult
 
 @Composable
 fun ModificationList(
-    viewModel: ModificationsViewModel
+    viewModel: ModificationsViewModel,
+    installEnabled: Boolean,
+    onInstall: (funlauncher.net.Hit) -> Unit
 ) {
     if (viewModel.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -35,7 +37,7 @@ fun ModificationList(
     } else {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(viewModel.searchResult?.hits ?: emptyList()) { hit ->
-                ModificationCard(hit) {
+                ModificationCard(hit, installEnabled, onInstall = { onInstall(hit) }) {
                     viewModel.selectProject(hit)
                 }
             }

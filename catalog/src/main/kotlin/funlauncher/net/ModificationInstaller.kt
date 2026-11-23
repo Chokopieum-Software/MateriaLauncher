@@ -1,13 +1,22 @@
 package funlauncher.net
 
 import kotlinx.coroutines.ensureActive
+import funlauncher.BuildType
 import funlauncher.MinecraftBuild
 import java.nio.file.Path
 
 class ModificationInstaller(private val api: CatalogSession, private val downloader: ModificationDownloader) {
-    suspend fun install(version: Version, build: MinecraftBuild, directory: String, world: String? = null, onProgress: (Float, String) -> Unit) {
-        val reasons = incompatibilityReasons(version, build, directory)
-        require(reasons.isEmpty()) { reasons.joinToString("; ") }
+    suspend fun install(version: Version, build: MinecraftBuild, directory: String, world: String? = null, onProgress: (Float, String) -> Unit) =
+        installBatch(listOf(version), build, directory, world, onProgress)
+
+    suspend fun installBatch(versions: List<Version>, build: MinecraftBuild, directory: String, world: String? = null,
+                             onProgress: (Float, String) -> Unit) {
+        val selected = versions.associateBy { it.projectId }
+        require(selected.size == versions.size) { "Выбраны разные версии одного проекта" }
+        for (version in versions) {
+            val reasons = incompatibilityReasons(version, build, directory)
+            require(reasons.isEmpty()) { reasons.joinToString("; ") }
+        }
         require(directory != "datapacks" || world != null) { "Выберите мир для датапака" }
         val resolved = linkedMapOf<String, Version>()
         val visiting = mutableSetOf<String>()
@@ -15,16 +24,16 @@ class ModificationInstaller(private val api: CatalogSession, private val downloa
             if (current.id in resolved || !visiting.add(current.id)) return
             for (dependency in current.dependencies.filter { it.dependencyType == "required" }) {
                 val candidate = dependency.versionId?.let { api.getVersion(it) }
-                    ?: dependency.projectId?.let { id -> api.getProjectVersions(id).firstOrNull { isCompatible(it, build, directory) } }
-                    ?: error("Не удалось разрешить обязательную зависимость")
-                val dependencyReasons = incompatibilityReasons(candidate, build, directory)
+                    ?: dependency.projectId?.let { id -> selected[id] ?: selectDependency(api.getProjectVersions(id), build, directory) }
+                    ?: error("Для ${current.name} не найдена зависимость ${dependency.projectId ?: dependency.versionId} (Minecraft ${minecraftVersion(build)}, ${build.type})")
+                val dependencyReasons = dependencyReasons(candidate, build, directory)
                 require(dependencyReasons.isEmpty()) { "Несовместимая зависимость ${candidate.name}: ${dependencyReasons.joinToString("; ")}" }
                 resolve(candidate)
             }
             visiting.remove(current.id)
             resolved[current.id] = current
         }
-        resolve(version)
+        versions.forEach { resolve(it) }
         require(resolved.values.map { it.projectId }.distinct().size == resolved.size) { "Зависимости требуют разные версии одного проекта" }
         val root = if (directory == "datapacks") {
             val save = ModificationDownloader.safeResolve(Path.of(build.installPath).resolve("saves"), world!!)
@@ -60,21 +69,37 @@ class ModificationInstaller(private val api: CatalogSession, private val downloa
     }
 
     companion object {
+        internal fun selectDependency(versions: List<Version>, build: MinecraftBuild, directory: String): Version? =
+            versions.firstOrNull { isCompatible(it, build, directory) }
+                ?: versions.firstOrNull { dependencyReasons(it, build, directory).isEmpty() }
+
+        private fun dependencyReasons(version: Version, build: MinecraftBuild, directory: String): List<String> {
+            // A Quilt project can declare a required library published only for Fabric.
+            val loader = if (directory == "mods" && build.type == BuildType.QUILT &&
+                version.loaders.any { it.equals("fabric", ignoreCase = true) }) BuildType.FABRIC else build.type
+            return incompatibilityReasons(version, build, directory, loader)
+        }
         fun isCompatible(version: Version, build: MinecraftBuild, directory: String): Boolean =
             incompatibilityReasons(version, build, directory).isEmpty()
 
-        fun incompatibilityReasons(version: Version, build: MinecraftBuild, directory: String): List<String> {
+        fun minecraftVersion(build: MinecraftBuild): String {
             // Imported Fabric/Quilt profiles put the loader before the Minecraft version.
             val profileVersion = Regex("^(?:fabric|quilt)-loader-[^-]+-(.+)$")
                 .matchEntire(build.version)?.groupValues?.get(1) ?: build.version
-            val minecraft = profileVersion.substringBefore("-fabric-").substringBefore("-forge-")
+            return profileVersion.substringBefore("-fabric-").substringBefore("-forge-")
                 .substringBefore("-neoforge-").substringBefore("-quilt-")
+        }
+
+        fun incompatibilityReasons(version: Version, build: MinecraftBuild, directory: String, loader: BuildType = build.type): List<String> {
+            val minecraft = minecraftVersion(build)
             return buildList {
                 if (minecraft !in version.gameVersions) {
                     add("Версия Minecraft не совпадает: в инстансе $minecraft; поддерживаются: ${version.gameVersions.joinToString().ifEmpty { "не указаны" }}")
                 }
-                if (directory !in setOf("resourcepacks", "shaderpacks", "datapacks") &&
-                    version.loaders.none { it.equals(build.type.name, true) }) {
+                // Modpacks (empty directory) create their own instance with the pack's loader.
+                val vanillaModpack = directory.isEmpty() && build.type == funlauncher.BuildType.VANILLA
+                if (!vanillaModpack && directory !in setOf("resourcepacks", "shaderpacks", "datapacks") &&
+                    version.loaders.none { it.equals(loader.name, true) }) {
                     add("Загрузчик не совпадает: в инстансе ${build.type.name}; поддерживаются: ${version.loaders.joinToString().ifEmpty { "не указаны" }}")
                 }
             }

@@ -5,12 +5,14 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import funlauncher.BuildType
 import funlauncher.MinecraftBuild
 import funlauncher.modpack.CatalogBuilds
 import funlauncher.managers.CacheManager
 import funlauncher.net.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -135,6 +137,11 @@ class ModificationsViewModel(
         api.close()
     }
 
+    fun closeProject() {
+        projectDetailsJob?.cancel()
+        selectedProject = null
+    }
+
     fun selectProject(hit: Hit) {
         projectDetailsJob?.cancel()
         projectDetailsError = null
@@ -193,21 +200,44 @@ class ModificationsViewModel(
         }
     }
 
-    private fun searchRequest(page: Int) = CatalogSearch(
+    var selectedBuild by mutableStateOf<MinecraftBuild?>(null)
+        private set
+
+    val availableTypes: List<ModificationType>
+        get() = ModificationType.entries.filter {
+            selectedBuild?.type != BuildType.VANILLA || it !in listOf(ModificationType.MODS, ModificationType.SHADERS)
+        }
+
+    fun selectBuild(build: MinecraftBuild?, keepProject: Boolean = false) {
+        selectedBuild = build
+        if (!keepProject || selectedType !in availableTypes) closeProject()
+        if (selectedType !in availableTypes) selectedType = ModificationType.RESOURCE_PACKS
+    }
+
+    private val buildLoader: String?
+        get() = selectedBuild?.type?.takeUnless { it == BuildType.VANILLA }?.name?.lowercase()?.takeIf {
+            selectedType == ModificationType.MODS || selectedType == ModificationType.MODPACKS
+        }
+
+    internal fun searchRequest(page: Int) = CatalogSearch(
         query = searchQuery,
         projectType = selectedType.projectType,
-        versions = selectedVersions.toList(),
+        versions = selectedBuild?.let { listOf(ModificationInstaller.minecraftVersion(it)) } ?: selectedVersions.toList(),
         categories = selectedCategories.filterValues { it == FilterState.INCLUDED }.keys.toList(),
-        loaders = selectedLoaders.filterValues { it == FilterState.INCLUDED }.keys.toList(),
+        loaders = if (selectedBuild != null) listOfNotNull(buildLoader) else selectedLoaders.filterValues { it == FilterState.INCLUDED }.keys.toList(),
         offset = page * pageSize,
         limit = pageSize,
         excludedCategories = selectedCategories.filterValues { it == FilterState.EXCLUDED }.keys.toList(),
-        excludedLoaders = selectedLoaders.filterValues { it == FilterState.EXCLUDED }.keys.toList()
+        excludedLoaders = if (selectedBuild != null) emptyList() else selectedLoaders.filterValues { it == FilterState.EXCLUDED }.keys.toList()
     )
 
-    fun search() {
-        if (selectedProject != null) return
+    private var searchJob: Job? = null
+    private var pageJob: Job? = null
 
+    fun search() {
+        searchJob?.cancel()
+        pageJob?.cancel()
+        isLoadingMore = false
         isLoading = true
         searchResult = null
         currentPage = 0
@@ -215,7 +245,7 @@ class ModificationsViewModel(
 
         val request = searchRequest(currentPage)
 
-        coroutineScope.launch {
+        searchJob = coroutineScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     api.search(request)
@@ -228,7 +258,7 @@ class ModificationsViewModel(
                 searchResult = SearchResult(emptyList(), 0, pageSize, 0)
                 hasMoreResults = false
             } finally {
-                isLoading = false
+                if (kotlinx.coroutines.currentCoroutineContext().isActive) isLoading = false
             }
         }
     }
@@ -241,7 +271,7 @@ class ModificationsViewModel(
 
         val request = searchRequest(currentPage)
 
-        coroutineScope.launch {
+        pageJob = coroutineScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     api.search(request)
@@ -257,7 +287,7 @@ class ModificationsViewModel(
             } catch (e: Exception) {
                 currentPage--
             } finally {
-                isLoadingMore = false
+                if (kotlinx.coroutines.currentCoroutineContext().isActive) isLoadingMore = false
             }
         }
     }

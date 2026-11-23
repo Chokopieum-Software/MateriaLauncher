@@ -1,21 +1,18 @@
 package ui.screens.modifications
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import funlauncher.net.Project
-import funlauncher.net.Version
+import org.chokopieum.software.ui.MateriaDetailsDialog
 import ui.widgets.ImageLoader
 
 @Composable
@@ -24,25 +21,14 @@ fun ModificationDetails(
     projectUrl: String,
     isLoadingDetails: Boolean,
     detailsError: String? = null,
+    onDismiss: () -> Unit,
     onInstallClick: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        // Заголовок и кнопка установки
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(project.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                Text(project.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            
-            Spacer(Modifier.width(16.dp))
-            
+    MateriaDetailsDialog(
+        title = project.title,
+        closeLabel = "Закрыть информацию о проекте",
+        onDismiss = onDismiss,
+        actions = {
             Button(
                 onClick = onInstallClick,
                 enabled = !isLoadingDetails && detailsError == null,
@@ -55,14 +41,13 @@ fun ModificationDetails(
                 }
             }
         }
-
-        Divider()
-        Spacer(Modifier.height(16.dp))
-
-        // Основная информация (скроллируемая)
-        Column(
-            modifier = Modifier.fillMaxWidth().weight(1f)
-        ) {
+    ) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
+            Text(project.description, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(16.dp))
             // Галерея
             if (project.gallery.isNotEmpty()) {
                 LazyRow(

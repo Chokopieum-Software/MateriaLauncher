@@ -41,6 +41,7 @@ enum class FilterState {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
 fun CatalogScreen(
+    cart: CatalogCart,
     providers: List<CatalogProvider>,
     consentStore: ProviderConsentStore,
     onBack: () -> Unit,
@@ -64,7 +65,7 @@ fun CatalogScreen(
     val provider = providers.find { it.id == selectedId } ?: providers.first()
     key(provider) {
         WithProviderConsent(provider, consentStore, onBack) {
-            ProviderCatalog(provider, providers, { selectedId = it.id }, onBack, buildManager,
+            ProviderCatalog(cart, provider, providers, { selectedId = it.id }, onBack, buildManager,
                 onModpackInstalled, loadVanillaVersions, snackbarHostState, cacheManager, installationScope)
         }
     }
@@ -73,6 +74,7 @@ fun CatalogScreen(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
 private fun ProviderCatalog(
+    cart: CatalogCart,
     provider: CatalogProvider,
     providers: List<CatalogProvider>,
     onSelectProvider: (CatalogProvider) -> Unit,
@@ -102,7 +104,6 @@ private fun ProviderCatalog(
     val modificationDownloader = remember { ModificationDownloader() }
 
     var pendingVersion by remember { mutableStateOf<Version?>(null) }
-    var pendingType by remember { mutableStateOf(ModificationType.MODS) }
     var worldBuild by remember { mutableStateOf<funlauncher.MinecraftBuild?>(null) }
     var installing by remember { mutableStateOf(false) }
 
@@ -143,6 +144,7 @@ private fun ProviderCatalog(
 
     LaunchedEffect(
         viewModel.searchQuery,
+        viewModel.selectedBuild,
         viewModel.selectedType,
         viewModel.selectedVersions.toList(),
         viewModel.selectedLoaders.toMap(),
@@ -151,6 +153,37 @@ private fun ProviderCatalog(
         viewModel.search()
     }
 
+    var pickingBuild by remember { mutableStateOf(false) }
+    var showingCart by remember { mutableStateOf(false) }
+    var fromList by remember { mutableStateOf(false) }
+    fun closeVersions() {
+        viewModel.showInstallDialog = false
+        if (fromList) viewModel.closeProject()
+        fromList = false
+    }
+    if (showingCart) {
+        CatalogCartDialog(cart, viewModel.selectedBuild, onChooseBuild = { pickingBuild = true },
+            onInstall = { cart.install(it, installationScope) }, onDismiss = { showingCart = false })
+    }
+    if (pickingBuild) {
+        BuildSelectionDialog(viewModel.allBuilds, onDismissRequest = { pickingBuild = false },
+            selectedBuild = viewModel.selectedBuild, onBuildSelected = {
+                viewModel.selectBuild(it)
+                pickingBuild = false
+            })
+    }
+    viewModel.selectedProject?.takeUnless { fromList }?.let { project ->
+        key(project.id) {
+            ModificationDetails(
+                project = project,
+                projectUrl = viewModel.api.projectUrl(project),
+                isLoadingDetails = viewModel.isLoadingProjectDetails || installing || (cart.busy && viewModel.selectedType.usesCart),
+                detailsError = viewModel.projectDetailsError,
+                onDismiss = viewModel::closeProject,
+                onInstallClick = { viewModel.showInstallDialog = true }
+            )
+        }
+    }
     if (viewModel.showVersionSelectionDialog) {
         VersionSelectionDialog(
             versions = viewModel.allVanillaVersions,
@@ -159,13 +192,29 @@ private fun ProviderCatalog(
         )
     }
 
-    if (viewModel.showInstallDialog) {
+    if (viewModel.showInstallDialog && viewModel.selectedType.usesCart && viewModel.selectedBuild == null) {
+        BuildSelectionDialog(viewModel.allBuilds, onDismissRequest = ::closeVersions, onBuildSelected = { build ->
+            val type = viewModel.selectedType
+            viewModel.selectBuild(build, keepProject = true)
+            if (type != viewModel.selectedType) closeVersions()
+        })
+    } else if (viewModel.showInstallDialog) {
         VersionInstallDialog(
-            versions = viewModel.projectVersions,
-            onDismissRequest = { viewModel.showInstallDialog = false },
+            addToCart = viewModel.selectedType.usesCart,
+            loading = viewModel.isLoadingProjectDetails,
+            error = viewModel.projectDetailsError,
+            versions = viewModel.selectedBuild?.let { build ->
+                viewModel.projectVersions.filter { ModificationInstaller.isCompatible(it, build, viewModel.selectedType.installDir) }
+            } ?: viewModel.projectVersions,
+            onDismissRequest = ::closeVersions,
             onInstallClick = { version ->
-                viewModel.showInstallDialog = false
-                if (viewModel.selectedType == ModificationType.MODPACKS) {
+                val project = viewModel.selectedProject
+                closeVersions()
+                if (viewModel.selectedType.usesCart) {
+                    if (project == null) return@VersionInstallDialog
+                    cart.add(CartItem(provider, project.title, viewModel.selectedType, version))
+                    viewModel.closeProject()
+                } else if (viewModel.selectedType == ModificationType.MODPACKS) {
                     installing = true
                     provider.installModpack(version, buildManager, installationScope, onComplete = {
                         installing = false
@@ -175,8 +224,8 @@ private fun ProviderCatalog(
                         installationScope.launch { snackbarHostState.showSnackbar(message) }
                     })
                 } else {
-                    pendingType = viewModel.selectedType
                     pendingVersion = version
+                    worldBuild = viewModel.selectedBuild
                 }
             }
         )
@@ -185,16 +234,10 @@ private fun ProviderCatalog(
         InstallModificationDialog(
             builds = viewModel.allBuilds,
             version = version,
-            directory = pendingType.installDir,
+            directory = ModificationType.DATAPACKS.installDir,
             onDismiss = { pendingVersion = null },
             onInstall = { build ->
-                if (pendingType == ModificationType.DATAPACKS) {
-                    worldBuild = build
-                } else {
-                    pendingVersion = null
-                    installing = true
-                    installVersion(version, build, pendingType)
-                }
+                worldBuild = build
             }
         )
     }
@@ -214,7 +257,7 @@ private fun ProviderCatalog(
                             worldBuild = null
                             if (version != null) {
                                 installing = true
-                                installVersion(version, build, pendingType, world.name)
+                                installVersion(version, build, ModificationType.DATAPACKS, world.name)
                             }
                         }) { Text(world.name) }
                     }
@@ -229,29 +272,28 @@ private fun ProviderCatalog(
         topBar = {
             TopAppBar(
                 title = {
-                    AnimatedContent(targetState = viewModel.selectedProject) { project ->
-                        if (project == null) {
-                            OutlinedTextField(
-                                value = viewModel.searchQuery,
-                                onValueChange = { viewModel.searchQuery = it },
-                                placeholder = { Text(stringResource(Res.string.search_placeholder)) },
-                                modifier = Modifier.fillMaxWidth(0.6f).padding(end = 16.dp),
-                                singleLine = true,
-                                leadingIcon = {
-                                    IconButton(onClick = { viewModel.isFilterPanelVisible = !viewModel.isFilterPanelVisible }) {
-                                        Icon(Icons.Default.FilterList, contentDescription = "Фильтры")
-                                    }
-                                },
-                                trailingIcon = {
-                                    Icon(Icons.Default.Search, contentDescription = "Поиск")
-                                }
-                            )
-                        } else {
-                            Text(project.title)
+                    OutlinedTextField(
+                        value = viewModel.searchQuery,
+                        onValueChange = { viewModel.searchQuery = it },
+                        placeholder = { Text(stringResource(Res.string.search_placeholder)) },
+                        modifier = Modifier.fillMaxWidth(0.6f).padding(end = 16.dp),
+                        singleLine = true,
+                        leadingIcon = {
+                            IconButton(onClick = { viewModel.isFilterPanelVisible = !viewModel.isFilterPanelVisible }) {
+                                Icon(Icons.Default.FilterList, contentDescription = "Фильтры")
+                            }
+                        },
+                        trailingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = "Поиск")
                         }
-                    }
+                    )
                 },
                 actions = {
+                    TextButton(onClick = { showingCart = true }) { Text("Корзина (${cart.items.size})") }
+                    OutlinedButton(onClick = { pickingBuild = true }) {
+                        Text(viewModel.selectedBuild?.name ?: "Выбрать сборку", maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 220.dp))
+                    }
                     if (providers.size > 1) {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
@@ -267,13 +309,6 @@ private fun ProviderCatalog(
                         }
                     }
                 },
-                navigationIcon = {
-                    AnimatedVisibility(visible = viewModel.selectedProject != null) {
-                        IconButton(onClick = { viewModel.selectedProject = null }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.back))
-                        }
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
                 ),
@@ -285,28 +320,16 @@ private fun ProviderCatalog(
             Row(modifier = Modifier.fillMaxSize().padding(bottom = contentPaddingBottom)) {
                 
                 // Левое меню с фильтрами
-                AnimatedVisibility(visible = viewModel.isFilterPanelVisible && viewModel.selectedProject == null) {
+                AnimatedVisibility(visible = viewModel.isFilterPanelVisible) {
                     FilterPanel(viewModel = viewModel)
                 }
 
                 // Основной контент
                 Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    // Keep one details instance when the project metadata is refreshed.
-                    val project = viewModel.selectedProject
-                    key(project?.id) {
-                        if (project != null) {
-                            ModificationDetails(
-                                project = project,
-                                projectUrl = viewModel.api.projectUrl(project),
-                                isLoadingDetails = viewModel.isLoadingProjectDetails || installing,
-                                detailsError = viewModel.projectDetailsError,
-                                onInstallClick = {
-                                    viewModel.showInstallDialog = true
-                                }
-                            )
-                        } else {
-                            ModificationList(viewModel = viewModel)
-                        }
+                    ModificationList(viewModel = viewModel, installEnabled = !installing && (!cart.busy || !viewModel.selectedType.usesCart)) { hit ->
+                        fromList = true
+                        viewModel.selectProject(hit)
+                        viewModel.showInstallDialog = true
                     }
                 }
             }
@@ -314,7 +337,7 @@ private fun ProviderCatalog(
             MateriaDock(
                 items = listOf(
                     MateriaDockItem.action(stringResource(Res.string.back), Icons.AutoMirrored.Filled.ArrowBack, onBack)
-                ) + ModificationType.entries.map { type ->
+                ) + viewModel.availableTypes.map { type ->
                     MateriaDockItem.tab(type.displayName, type.icon, viewModel.selectedType == type) {
                         viewModel.selectedProject = null
                         viewModel.selectedType = type

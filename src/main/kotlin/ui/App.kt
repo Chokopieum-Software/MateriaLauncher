@@ -67,6 +67,7 @@ fun App(
     homeViewModel: HomeViewModel,
     onExitForUpdate: () -> Unit
 ) {
+    val catalogCart = remember { CatalogCart() }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var createButtonBounds by remember { mutableStateOf<Rect?>(null) }
@@ -88,6 +89,7 @@ fun App(
                         when (tab) {
                             AppTab.Home -> HomeScreen(homeViewModel)
                             AppTab.Catalog -> CatalogScreen(
+                                cart = catalogCart,
                                 consentStore = remember(pathManager) {
                                     ProviderConsentStore(pathManager.getAppDataDirectory().resolve("provider-consents"))
                                 },
