@@ -15,8 +15,10 @@ class SettingsManagerTest {
         val directory = Files.createTempDirectory("materia-settings-test")
         try {
             val manager = SettingsManager(PathManager(directory))
+            assertEquals(false, manager.loadSettings().setupCompleted)
             manager.saveSettings(AppSettings())
-            val updated = AppSettings(theme = Theme.Dark, maxRamMb = 6144, javaArgs = "-XX:+UseG1GC")
+            assertEquals(false, SettingsManager(PathManager(directory)).loadSettings().setupCompleted)
+            val updated = AppSettings(theme = Theme.Dark, maxRamMb = 6144, javaArgs = "-XX:+UseG1GC", setupCompleted = true)
             manager.saveSettings(updated)
             assertEquals(updated, SettingsManager(PathManager(directory)).loadSettings())
             Files.list(directory).use { assertEquals(1L, it.count()) }

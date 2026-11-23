@@ -33,6 +33,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.job
 import kotlin.coroutines.coroutineContext
+import org.chokopieum.software.ui.MateriaDock
+import org.chokopieum.software.ui.MateriaDockItem
 
 enum class FilterState {
     INCLUDED, EXCLUDED
@@ -259,39 +261,48 @@ fun ModificationsScreen(
                 }
             }
 
-            // NavigationBar (нижняя панель)
-            AnimatedVisibility(
-                visible = true,
-                enter = slideInVertically(initialOffsetY = { offset -> offset }),
-                exit = slideOutVertically(targetOffsetY = { offset -> offset }),
-                modifier = Modifier.align(Alignment.BottomCenter)
-            ) {
-                NavigationBar(
-                    modifier = Modifier
-                        .padding(bottom = 16.dp)
-                        .width(500.dp)
-                        .height(64.dp)
-                        .shadow(elevation = 8.dp, shape = RoundedCornerShape(16.dp))
-                        .clip(RoundedCornerShape(16.dp)),
-                    containerColor = MaterialTheme.colorScheme.surface
-                ) {
-                    NavigationBarItem(
-                        selected = false,
-                        onClick = onBack,
-                        icon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.back)) },
-                        label = { Text(stringResource(Res.string.back)) }
-                    )
-                    val modificationTypes = ModificationType.entries
-                    modificationTypes.forEach { type ->
-                        NavigationBarItem(
-                            selected = viewModel.selectedType == type,
-                            onClick = { viewModel.selectedType = type },
-                            icon = { Icon(type.icon, contentDescription = type.displayName) },
-                            label = { Text(type.displayName) }
-                        )
+            MateriaDock(
+                items = listOf(
+                    MateriaDockItem.action(stringResource(Res.string.back), Icons.AutoMirrored.Filled.ArrowBack, onBack)
+                ) + ModificationType.entries.map { type ->
+                    MateriaDockItem.tab(type.displayName, type.icon, viewModel.selectedType == type) {
+                        viewModel.selectedType = type
                     }
-                }
-            }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp).width(500.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LegacyModificationsNavigation(
+    viewModel: ModificationsViewModel,
+    onBack: () -> Unit
+) {
+    NavigationBar(
+        modifier = Modifier
+            .padding(bottom = 16.dp)
+            .width(500.dp)
+            .height(64.dp)
+            .shadow(elevation = 8.dp, shape = RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp)),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        NavigationBarItem(
+            selected = false,
+            onClick = onBack,
+            icon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.back)) },
+            label = { Text(stringResource(Res.string.back)) }
+        )
+        val modificationTypes = ModificationType.entries
+        modificationTypes.forEach { type ->
+            NavigationBarItem(
+                selected = viewModel.selectedType == type,
+                onClick = { viewModel.selectedType = type },
+                icon = { Icon(type.icon, contentDescription = type.displayName) },
+                label = { Text(type.displayName) }
+            )
         }
     }
 }

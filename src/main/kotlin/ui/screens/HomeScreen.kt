@@ -280,7 +280,7 @@ private fun EmptyState(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center
     ) {
         Text(
-            "Сборки не найдены.\nНажмите \"Добавить\", чтобы добавить новую.",
+            "Создай свой первый инстанс!",
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)

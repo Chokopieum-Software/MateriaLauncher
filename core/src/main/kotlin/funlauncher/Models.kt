@@ -43,7 +43,8 @@ data class AppSettings(
     val envVars: String = "",
     val javaPath: String = "",
     val showConsoleOnLaunch: Boolean = false,
-    val language: String = "ru"
+    val language: String = "ru",
+    val setupCompleted: Boolean = false
 )
 
 enum class Theme {

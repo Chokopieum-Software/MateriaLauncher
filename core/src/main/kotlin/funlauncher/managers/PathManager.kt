@@ -86,15 +86,6 @@ class PathManager(private val rootDir: Path) {
 
 
     /**
-     * Проверяет, нужно ли запускать мастер первоначальной настройки.
-     * Теперь это определяется по наличию файла базы данных (materiakraft.db).
-     */
-    fun isFirstRunRequired(): Boolean {
-        val dbFile = getAppDataDirectory().resolve("materiakraft.db")
-        return !Files.exists(dbFile)
-    }
-
-    /**
      * Создает все необходимые директории для работы лаунчера.
      */
     fun createRequiredDirectories() {

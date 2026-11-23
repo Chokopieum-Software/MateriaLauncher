@@ -18,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import funlauncher.auth.AccountManager
-import funlauncher.AppSettings
 import funlauncher.Theme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,7 +38,7 @@ fun FirstRunWizard(
     accountManager: AccountManager?,
     initialTheme: Theme,
     onThemeChange: (Theme) -> Unit,
-    onWizardComplete: (AppSettings) -> Unit
+    onWizardComplete: suspend () -> Unit
 ) {
     var currentStep by remember { mutableStateOf(WizardStep.WELCOME) }
     var isAuthenticating by remember { mutableStateOf(false) }
@@ -47,6 +46,8 @@ fun FirstRunWizard(
     var authSuccess by remember { mutableStateOf(false) }
     var authAttempt by remember { mutableStateOf(0) }
 
+    var saving by remember { mutableStateOf(false) }
+    var saveError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     fun handleLogin() {
@@ -190,13 +191,14 @@ fun FirstRunWizard(
                 }
             }
 
+            saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             // Навигация
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 if (currentStep != WizardStep.WELCOME) {
-                    OutlinedButton(enabled = !isAuthenticating, onClick = {
+                    OutlinedButton(enabled = !isAuthenticating && !saving, onClick = {
                         currentStep = WizardStep.values()[currentStep.ordinal - 1] 
                     }) {
                         Text("Назад")
@@ -206,17 +208,27 @@ fun FirstRunWizard(
                 }
 
                 if (currentStep != WizardStep.FINISH) {
-                    Button(enabled = !isAuthenticating, onClick = {
+                    Button(enabled = !isAuthenticating && !saving, onClick = {
                         currentStep = WizardStep.values()[currentStep.ordinal + 1] 
                     }) {
                         Text("Далее")
                     }
                 } else {
-                    Button(onClick = {
-                        val finalSettings = AppSettings(
-                            theme = initialTheme
-                        )
-                        onWizardComplete(finalSettings)
+                    Button(enabled = !saving, onClick = {
+                        if (saving) return@Button
+                        saving = true
+                        saveError = null
+                        scope.launch {
+                            try {
+                                onWizardComplete()
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                saveError = "Не удалось сохранить настройки: ${e.localizedMessage}"
+                            } finally {
+                                saving = false
+                            }
+                        }
                     }) {
                         Text("Завершить")
                     }

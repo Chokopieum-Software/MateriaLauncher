@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import funlauncher.managers.CacheManager
 import funlauncher.managers.PathManager
 import kotlinx.coroutines.delay
+import org.chokopieum.software.ui.MateriaDock
+import org.chokopieum.software.ui.MateriaDockItem
 import org.chokopieum.software.materia_launcher.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
 import state.AppState
@@ -139,14 +141,15 @@ private fun BoxScope.BottomBar(
     homeViewModel: HomeViewModel,
     onCreateButtonBounds: (Rect) -> Unit
 ) {
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 16.dp)
     ) {
         // Поиск
-        Box(modifier = Modifier.align(Alignment.CenterStart)) {
+        val sideWidth = ((maxWidth - 300.dp) / 2 - 8.dp).coerceAtLeast(0.dp)
+        Box(modifier = Modifier.align(Alignment.CenterStart).widthIn(max = sideWidth)) {
             AnimatedVisibility(
                 visible = viewModel.currentTab == AppTab.Home,
                 enter = fadeIn(),
@@ -193,6 +196,33 @@ private fun BoxScope.BottomBar(
 
 @Composable
 private fun AppNavigation(
+    currentTab: AppTab,
+    onTabSelected: (AppTab) -> Unit
+) {
+    AnimatedVisibility(
+        visible = currentTab != AppTab.Modifications,
+        enter = slideInVertically(initialOffsetY = { it }),
+        exit = slideOutVertically(targetOffsetY = { it })
+    ) {
+        MateriaDock(
+            items = listOf(
+                MateriaDockItem.tab(stringResource(Res.string.tab_home), Icons.Default.Home, currentTab == AppTab.Home) {
+                    onTabSelected(AppTab.Home)
+                },
+                MateriaDockItem.tab(stringResource(Res.string.tab_modifications), Icons.Default.Build, currentTab == AppTab.Modifications) {
+                    onTabSelected(AppTab.Modifications)
+                },
+                MateriaDockItem.tab(stringResource(Res.string.tab_settings), Icons.Default.Settings, currentTab == AppTab.Settings) {
+                    onTabSelected(AppTab.Settings)
+                }
+            ),
+            modifier = Modifier.width(300.dp)
+        )
+    }
+}
+
+@Composable
+private fun LegacyAppNavigation(
     currentTab: AppTab,
     onTabSelected: (AppTab) -> Unit
 ) {
