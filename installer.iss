@@ -37,6 +37,9 @@ OutputBaseFilename=MateriaLauncher-Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=src\main\resources\logo.ico
+WizardSmallImageFile=src\main\resources\MaretiaNewLogo.png
+UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

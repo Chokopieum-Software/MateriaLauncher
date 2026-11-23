@@ -27,7 +27,6 @@ import funlauncher.managers.CacheManager
 import funlauncher.managers.JavaManager
 import funlauncher.managers.PathManager
 import funlauncher.net.JavaDownloader
-import funlauncher.net.ModrinthApi
 import funlauncher.utils.LogCollector
 import kotlinx.coroutines.*
 import org.chokopieum.software.materia_launcher.generated.resources.*
@@ -45,8 +44,6 @@ import org.jetbrains.jewel.intui.standalone.theme.IntUiTheme
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.window.DecoratedWindow
 import org.jetbrains.jewel.window.TitleBar
-import java.time.Month
-import java.time.OffsetDateTime
 import java.util.*
 import javax.swing.JLabel
 import javax.swing.SwingUtilities
@@ -72,7 +69,6 @@ private lateinit var globalBuildManager: BuildManager
 private lateinit var globalJavaManager: JavaManager
 private lateinit var globalJavaDownloader: JavaDownloader
 private lateinit var globalCacheManager: CacheManager
-private lateinit var globalModrinthApi: ModrinthApi
 private lateinit var globalVersionMetadataFetcher: VersionMetadataFetcher
 
 @OptIn(ExperimentalResourceApi::class)
@@ -174,7 +170,6 @@ private fun runApplication(isUiTest: Boolean) {
         globalJavaManager = JavaManager(globalPathManager)
         globalJavaDownloader = JavaDownloader(globalPathManager, globalJavaManager)
         globalCacheManager = CacheManager(globalPathManager, globalSettingsManager) // Передаем SettingsManager
-        globalModrinthApi = ModrinthApi(globalCacheManager)
         globalVersionMetadataFetcher = VersionMetadataFetcher(globalBuildManager, globalPathManager)
 
         ImageLoader.init(globalCacheManager)
@@ -201,13 +196,7 @@ private fun runApplication(isUiTest: Boolean) {
         // Изменяется на false, когда настройка завершена.
         var showFirstRunWizard by remember { mutableStateOf(!initialSettings.setupCompleted) }
 
-        val month = OffsetDateTime.now().month
-        val isWinter = month == Month.DECEMBER || month == Month.JANUARY || month == Month.FEBRUARY
-        val icon = if (isWinter) {
-            painterResource(Res.drawable.MLicon_snow)
-        } else {
-            painterResource(Res.drawable.MLicon)
-        }
+        val icon = painterResource(Res.drawable.materia_logo)
 
         LaunchedEffect(currentScreen) {
             if (currentScreen is Screen.Splash) {
@@ -273,7 +262,6 @@ private fun runApplication(isUiTest: Boolean) {
                 onCloseRequest = {
                     scope.launch {
                         viewModel?.cancelScope()
-                        globalModrinthApi.close()
                         exitApplication()
                     }
                 },

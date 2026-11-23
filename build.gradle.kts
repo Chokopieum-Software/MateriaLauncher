@@ -153,6 +153,9 @@ group = "org.chokopieum.software"
 version = appVersion
 
 dependencies {
+    implementation(project(":catalog"))
+    implementation(project(":catalog-provider-api"))
+    implementation(project(":providers:modrinth"))
     implementation(project(":core"))
     implementation(project(":ui-components"))
     implementation(compose.desktop.currentOs)
@@ -174,10 +177,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
     implementation("com.google.code.gson:gson:2.15.0")
     implementation("com.akuleshov7:ktoml-core-jvm:0.7.1")
-    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.46.0")
-    implementation("com.mikepenz:multiplatform-markdown-renderer-coil3:0.46.0")
-    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
-    implementation("io.coil-kt.coil3:coil-svg:3.6.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
     implementation("io.ktor:ktor-client-core:3.6.1")
     implementation("io.ktor:ktor-client-cio:3.6.1")
@@ -197,11 +196,6 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-dao:1.6.1")
     implementation("org.jetbrains.exposed:exposed-jdbc:1.6.1")
     implementation("org.xerial:sqlite-jdbc:3.54.1.0")
-    implementation("org.commonmark:commonmark:0.24.0")
-    implementation("org.commonmark:commonmark-ext-gfm-tables:0.24.0")
-    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.24.0")
-    implementation("org.commonmark:commonmark-ext-autolink:0.24.0")
-    implementation("org.jsoup:jsoup:1.21.2")
     implementation("net.java.dev.jna:jna-platform:5.18.1")
     testImplementation(kotlin("test-junit"))
 }
@@ -228,6 +222,10 @@ compose.desktop {
 
             // Installers are built by Inno Setup from createDistributable output.
 
+            linux {
+                iconFile.set(project.file("src/main/resources/MaretiaNewLogo.png"))
+            }
+
             windows {
                 if (isTestBuild) {
                     console = true
@@ -252,6 +250,10 @@ val coverFiles = fileTree("src/main/composeResources/drawable/cover") {
 // Nested folders in drawable are not supported by the Compose accessor generator.
 // Package covers separately, leaving the requested source directory intact.
 val prepareUiResources by tasks.registering(Sync::class) {
+    from("src/main/resources/MaretiaNewLogo.png") {
+        into("drawable")
+        rename { "materia_logo.png" }
+    }
     from("src/main/composeResources") { exclude("drawable/cover/**") }
     into(layout.buildDirectory.dir("generated/uiResources"))
     includeEmptyDirs = false

@@ -1,0 +1,68 @@
+<svg width="547" height="517" viewBox="0 0 547 517" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="547" height="517" fill="#1E1E1E"/>
+<rect x="17.3014" y="1.24876" width="512" height="512" rx="77" fill="white"/>
+<mask id="stroke0_0_1" fill="white">
+<path d="M389.488 259.107C388.351 400.487 335.466 514.681 271.365 514.165C207.265 513.65 156.223 398.621 157.36 257.24C158.497 115.86 211.382 1.66659 275.482 2.18201C339.582 2.69743 390.624 117.727 389.488 259.107Z"/>
+</mask>
+<path d="M389.488 259.107C388.351 400.487 335.466 514.681 271.365 514.165C207.265 513.65 156.223 398.621 157.36 257.24C158.497 115.86 211.382 1.66659 275.482 2.18201C339.582 2.69743 390.624 117.727 389.488 259.107Z" stroke-width="16" stroke="url(#paint0_linear_0_1)" mask="url(#stroke0_0_1)"/>
+<path d="M389.488 259.107C388.351 400.487 335.466 514.681 271.365 514.165C207.265 513.65 156.223 398.621 157.36 257.24C158.497 115.86 211.382 1.66659 275.482 2.18201C339.582 2.69743 390.624 117.727 389.488 259.107Z" stroke-width="16" stroke="url(#paint1_linear_0_1)" stroke-opacity="0.2" mask="url(#stroke0_0_1)"/>
+<mask id="stroke1_0_1" fill="white">
+<path d="M198.019 169.936C305.504 78.0842 426.397 43.1287 468.041 91.8609C509.686 140.593 456.312 254.559 348.828 346.411C241.344 438.263 120.451 473.219 78.806 424.487C37.1613 375.754 90.5348 261.788 198.019 169.936Z"/>
+</mask>
+<path d="M198.019 169.936C305.504 78.0841 426.397 43.1287 468.041 91.8609C509.686 140.593 456.312 254.559 348.828 346.411C241.344 438.263 120.451 473.219 78.806 424.487C37.1613 375.754 90.5348 261.788 198.019 169.936Z" stroke-width="16" stroke="url(#paint2_linear_0_1)" stroke-opacity="0.5" mask="url(#stroke1_0_1)"/>
+<path d="M198.019 169.936C305.504 78.0841 426.397 43.1287 468.041 91.8609C509.686 140.593 456.312 254.559 348.828 346.411C241.344 438.263 120.451 473.219 78.806 424.487C37.1613 375.754 90.5348 261.788 198.019 169.936Z" stroke-width="16" stroke="#FF0000" stroke-opacity="0.5" mask="url(#stroke1_0_1)"/>
+<mask id="stroke2_0_1" fill="white">
+<path d="M347.957 169.199C456.339 259.991 510.83 373.427 469.666 422.566C428.503 471.705 307.272 437.939 198.89 347.148C90.5081 256.357 36.0171 142.921 77.1809 93.7816C118.345 44.6424 239.575 78.4081 347.957 169.199Z"/>
+</mask>
+<path d="M347.957 169.199C456.339 259.991 510.83 373.427 469.666 422.566C428.503 471.705 307.272 437.939 198.89 347.148C90.5081 256.357 36.0171 142.921 77.1809 93.7816C118.345 44.6424 239.575 78.4081 347.957 169.199Z" stroke-width="16" stroke="url(#paint3_linear_0_1)" mask="url(#stroke2_0_1)"/>
+<path d="M347.957 169.199C456.339 259.991 510.83 373.427 469.666 422.566C428.503 471.705 307.272 437.939 198.89 347.148C90.5081 256.357 36.0171 142.921 77.1809 93.7816C118.345 44.6424 239.575 78.4081 347.957 169.199Z" stroke-width="16" stroke="url(#paint4_linear_0_1)" stroke-opacity="0.2" mask="url(#stroke2_0_1)"/>
+<foreignObject x="0" y="0" width="547" height="517" overflow="visible" data-figma-3d="true">
+<div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:547px;height:517px">
+<div style="position:absolute;left:0;top:0;margin:0;width:100px;height:100px;transform-origin:0 0;transform:matrix(1, 0, 0, 1, 257.4042, 237.046) translate(50%, 50%) rotateX(-35.2644deg) rotateY(45deg) translate(-50%, -50%)">
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" overflow="visible" style="position:absolute;left:0;top:0;overflow:visible">
+<rect width="100" height="100" fill="#4A52D1"/>
+</svg>
+</div>
+</div>
+</foreignObject>
+<foreignObject x="0" y="0" width="547" height="517" overflow="visible" data-figma-3d="true">
+<div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:547px;height:517px">
+<div style="position:absolute;left:0;top:0;margin:0;width:100px;height:100px;transform-origin:0 0;transform:matrix(1, 0, 0, 1, 188.3014, 237.046) translate(50%, 50%) rotateX(-35.2644deg) rotateY(-45deg) translate(-50%, -50%)">
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" overflow="visible" style="position:absolute;left:0;top:0;overflow:visible">
+<rect width="100" height="100" fill="#6B75F5"/>
+</svg>
+</div>
+</div>
+</foreignObject>
+<foreignObject x="0" y="0" width="547" height="517" overflow="visible" data-figma-3d="true">
+<div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:547px;height:517px">
+<div style="position:absolute;left:0;top:0;margin:0;width:100px;height:100px;transform-origin:0 0;transform:matrix(1, 0, 0, 1, 222.8528, 177.2488) translate(50%, 50%) rotateX(54.7356deg) rotateZ(-45deg) translate(-50%, -50%)">
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" overflow="visible" style="position:absolute;left:0;top:0;overflow:visible">
+<rect width="100" height="100" fill="#ADB5FF"/>
+</svg>
+</div>
+</div>
+</foreignObject>
+<defs>
+<linearGradient id="paint0_linear_0_1" x1="275.482" y1="2.18201" x2="271.365" y2="514.165" gradientUnits="userSpaceOnUse">
+<stop stop-color="#7067EB"/>
+<stop offset="1" stop-color="#3F3A85"/>
+</linearGradient>
+<linearGradient id="paint1_linear_0_1" x1="275.482" y1="2.18201" x2="271.365" y2="514.165" gradientUnits="userSpaceOnUse">
+<stop stop-color="#FF0000"/>
+<stop offset="1" stop-color="#990000"/>
+</linearGradient>
+<linearGradient id="paint2_linear_0_1" x1="198.019" y1="169.936" x2="348.828" y2="346.411" gradientUnits="userSpaceOnUse">
+<stop stop-color="#1100FF" stop-opacity="0"/>
+<stop offset="1" stop-color="#1100FF"/>
+</linearGradient>
+<linearGradient id="paint3_linear_0_1" x1="347.957" y1="169.199" x2="198.89" y2="347.148" gradientUnits="userSpaceOnUse">
+<stop stop-color="#251E87" stop-opacity="0"/>
+<stop offset="1" stop-color="#251E87"/>
+</linearGradient>
+<linearGradient id="paint4_linear_0_1" x1="347.957" y1="169.199" x2="198.89" y2="347.148" gradientUnits="userSpaceOnUse">
+<stop stop-color="#FF0000"/>
+<stop offset="1" stop-color="#990000"/>
+</linearGradient>
+</defs>
+</svg>

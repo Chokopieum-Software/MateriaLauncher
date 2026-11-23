@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Materia</string>
     <string name="tab_home">Главная</string>
-    <string name="tab_modifications">Модификации</string>
+    <string name="tab_catalog">Каталог</string>
     <string name="tab_settings">Настройки</string>
     <string name="search_placeholder">Поиск...</string>
     <string name="back">Назад</string>

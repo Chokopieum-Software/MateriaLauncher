@@ -30,3 +30,5 @@ rootProject.name = "Materia Launcher"
 include("core")
 include("ui-components")
 include("updater")
+include("catalog")
+include("catalog-provider-api", "providers:modrinth")

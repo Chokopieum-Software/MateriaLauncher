@@ -61,7 +61,7 @@ import funlauncher.openUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.chokopieum.software.materia_launcher.generated.resources.GitHub
-import org.chokopieum.software.materia_launcher.generated.resources.MLicon
+import org.chokopieum.software.materia_launcher.generated.resources.materia_logo
 import org.chokopieum.software.materia_launcher.generated.resources.Res
 import org.jetbrains.compose.resources.painterResource
 import ui.viewmodel.AccountViewModel
@@ -470,7 +470,7 @@ private fun AboutScreen(onExitForUpdate: () -> Unit) {
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
-                            Image(painterResource(Res.drawable.MLicon), contentDescription = null,
+                            Image(painterResource(Res.drawable.materia_logo), contentDescription = null,
                                 modifier = Modifier.padding(12.dp).size(56.dp))
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

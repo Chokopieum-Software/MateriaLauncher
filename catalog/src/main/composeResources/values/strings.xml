@@ -1,0 +1,18 @@
+<resources>
+    <string name="search_placeholder">Search...</string>
+    <string name="back">Back</string>
+    <string name="versions">Versions</string>
+    <string name="categories">Categories</string>
+    <string name="loaders">Loaders</string>
+    <string name="select_a_build">Select a build</string>
+    <string name="no_compatible_builds">No compatible builds found.</string>
+    <string name="cancel">Cancel</string>
+    <string name="included">Included</string>
+    <string name="excluded">Excluded</string>
+    <string name="provider_terms_title">%1$s terms</string>
+    <string name="provider_terms_intro">To use %1$s, review the privacy policy and accept the terms of use.</string>
+    <string name="provider_terms_link">Terms of use</string>
+    <string name="provider_privacy_link">Privacy policy</string>
+    <string name="provider_consent_error">Could not save your acceptance. Please try again.</string>
+    <string name="provider_accept">Accept and continue</string>
+</resources>

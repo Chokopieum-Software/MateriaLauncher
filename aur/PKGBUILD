@@ -64,19 +64,7 @@ package() {
     echo "./$_bin_name \"\$@\"" >> "$pkgdir/usr/bin/materiakraft-launcher"
     chmod 755 "$pkgdir/usr/bin/materiakraft-launcher"
 
-    # --- 3. Поиск и установка иконки ---
-    echo "Поиск иконки materia-launcher.png..."
-
-    # Ищем файл конкретно с этим именем, исключая папку build (чтобы не взять копию из скомпилированных ресурсов)
-    _icon_file=$(find . -type f -name "materia-launcher.png" -not -path "*/build/*" | head -n 1)
-
-    if [ -n "$_icon_file" ]; then
-        # Копируем и переименовываем в имя пакета (стандарт Arch)
-        install -Dm644 "$_icon_file" "$pkgdir/usr/share/pixmaps/$pkgname.png"
-        echo "Иконка установлена: $_icon_file -> /usr/share/pixmaps/$pkgname.png"
-    else
-        echo "ПРЕДУПРЕЖДЕНИЕ: Файл materia-launcher.png не найден в исходниках!"
-    fi
+    install -Dm644 src/main/resources/MaretiaNewLogo.png "$pkgdir/usr/share/pixmaps/$pkgname.png"
 
     # --- 4. Создание .desktop файла ---
     echo "[Desktop Entry]" > "$pkgname.desktop"

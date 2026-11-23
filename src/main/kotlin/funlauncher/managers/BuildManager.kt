@@ -8,6 +8,7 @@
 
 package funlauncher.managers
 
+import funlauncher.modpack.CatalogBuilds
 import funlauncher.BuildType
 import funlauncher.AppSettings
 import funlauncher.SettingsManager
@@ -26,7 +27,7 @@ import java.nio.file.Path
 import kotlin.io.path.*
 
 @OptIn(ExperimentalPathApi::class)
-class BuildManager(private val pathManager: PathManager) {
+class BuildManager(private val pathManager: PathManager) : CatalogBuilds {
     private val launcherPath: Path = pathManager.getAppDataDirectory()
     private val instancesPath: Path = launcherPath.resolve("instances")
     private val backgroundsPath: Path = launcherPath.resolve("backgrounds")
@@ -73,7 +74,7 @@ class BuildManager(private val pathManager: PathManager) {
         }
     }
 
-    suspend fun loadBuilds(): List<MinecraftBuild> = withContext(Dispatchers.IO) {
+    override suspend fun loadBuilds(): List<MinecraftBuild> = withContext(Dispatchers.IO) {
         buildsMutex.withLock {
             val builds = buildDao.getAll()
             val globalSettings = SettingsManager(pathManager).loadSettings()
@@ -157,7 +158,7 @@ class BuildManager(private val pathManager: PathManager) {
         return "Unknown" to BuildType.VANILLA
     }
 
-    suspend fun addBuild(name: String, version: String, type: BuildType, imagePath: String?) = withContext(Dispatchers.IO) {
+    override suspend fun addBuild(name: String, version: String, type: BuildType, imagePath: String?) = withContext(Dispatchers.IO) {
         val initialSettings = SettingsManager(pathManager).loadSettings()
         buildsMutex.withLock {
             require(name.isNotBlank()) { "Название сборки не может быть пустым" }
@@ -288,7 +289,7 @@ class BuildManager(private val pathManager: PathManager) {
         }
     }
 
-    fun getBuildPath(buildName: String): Path {
+    override fun getBuildPath(buildName: String): Path {
         return instancesPath.resolve(buildName.trim())
     }
 

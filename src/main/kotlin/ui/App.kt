@@ -32,6 +32,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
+import funlauncher.game.VersionMetadataFetcher
+import funlauncher.net.ModrinthProvider
 import funlauncher.managers.CacheManager
 import funlauncher.managers.PathManager
 import kotlinx.coroutines.delay
@@ -46,7 +48,7 @@ import ui.viewmodel.AppViewModel
 import ui.viewmodel.HomeViewModel
 
 // Перечисление для вкладок навигации в приложении.
-enum class AppTab { Home, Modifications, Settings }
+enum class AppTab { Home, Catalog, Settings }
 
 /**
  * Главный компонент приложения, который управляет состоянием и отображением основного интерфейса.
@@ -77,7 +79,7 @@ fun App(
             containerColor = Color.Transparent // Делаем фон Scaffold прозрачным
         ) {
             // Анимированные отступы для контента в зависимости от положения навигационной панели.
-            val contentPaddingBottom by animateDpAsState(if (viewModel.currentTab != AppTab.Modifications) 80.dp else 0.dp)
+            val contentPaddingBottom by animateDpAsState(if (viewModel.currentTab != AppTab.Catalog) 80.dp else 0.dp)
 
             Box(modifier = Modifier.fillMaxSize()) {
                 // Плавный переход между экранами (вкладками).
@@ -85,14 +87,20 @@ fun App(
                     Crossfade(targetState = viewModel.currentTab, animationSpec = tween(300)) { tab ->
                         when (tab) {
                             AppTab.Home -> HomeScreen(homeViewModel)
-                            AppTab.Modifications -> ModificationsScreen(
+                            AppTab.Catalog -> CatalogScreen(
+                                consentStore = remember(pathManager) {
+                                    ProviderConsentStore(pathManager.getAppDataDirectory().resolve("provider-consents"))
+                                },
+                                providers = remember(cacheManager) { listOf(ModrinthProvider(cacheManager)) },
                                 onBack = { viewModel.currentTab = AppTab.Home },
                                 buildManager = viewModel.buildManager,
                                 onModpackInstalled = {
                                     viewModel.refreshBuilds()
-                                    if (viewModel.currentTab == AppTab.Modifications) viewModel.currentTab = AppTab.Home
+                                    if (viewModel.currentTab == AppTab.Catalog) viewModel.currentTab = AppTab.Home
                                 },
-                                pathManager = pathManager,
+                                loadVanillaVersions = {
+                                    VersionMetadataFetcher(viewModel.buildManager, pathManager).getVanillaVersions()
+                                },
                                 snackbarHostState = snackbarHostState,
                                 installationScope = viewModel.viewModelScope,
                                 cacheManager = cacheManager
@@ -200,7 +208,7 @@ private fun AppNavigation(
     onTabSelected: (AppTab) -> Unit
 ) {
     AnimatedVisibility(
-        visible = currentTab != AppTab.Modifications,
+        visible = currentTab != AppTab.Catalog,
         enter = slideInVertically(initialOffsetY = { it }),
         exit = slideOutVertically(targetOffsetY = { it })
     ) {
@@ -209,8 +217,8 @@ private fun AppNavigation(
                 MateriaDockItem.tab(stringResource(Res.string.tab_home), Icons.Default.Home, currentTab == AppTab.Home) {
                     onTabSelected(AppTab.Home)
                 },
-                MateriaDockItem.tab(stringResource(Res.string.tab_modifications), Icons.Default.Build, currentTab == AppTab.Modifications) {
-                    onTabSelected(AppTab.Modifications)
+                MateriaDockItem.tab(stringResource(Res.string.tab_catalog), Icons.Default.Build, currentTab == AppTab.Catalog) {
+                    onTabSelected(AppTab.Catalog)
                 },
                 MateriaDockItem.tab(stringResource(Res.string.tab_settings), Icons.Default.Settings, currentTab == AppTab.Settings) {
                     onTabSelected(AppTab.Settings)
@@ -228,7 +236,7 @@ private fun LegacyAppNavigation(
 ) {
     // Нижняя навигационная панель.
     AnimatedVisibility(
-        visible = currentTab != AppTab.Modifications,
+        visible = currentTab != AppTab.Catalog,
         enter = slideInVertically(initialOffsetY = { it }),
         exit = slideOutVertically(targetOffsetY = { it })
     ) {
@@ -248,10 +256,10 @@ private fun LegacyAppNavigation(
                 label = { Text(stringResource(Res.string.tab_home)) }
             )
             NavigationBarItem(
-                selected = currentTab == AppTab.Modifications,
-                onClick = { onTabSelected(AppTab.Modifications) },
-                icon = { Icon(Icons.Default.Build, contentDescription = stringResource(Res.string.tab_modifications)) },
-                label = { Text(stringResource(Res.string.tab_modifications)) }
+                selected = currentTab == AppTab.Catalog,
+                onClick = { onTabSelected(AppTab.Catalog) },
+                icon = { Icon(Icons.Default.Build, contentDescription = stringResource(Res.string.tab_catalog)) },
+                label = { Text(stringResource(Res.string.tab_catalog)) }
             )
             NavigationBarItem(
                 selected = currentTab == AppTab.Settings,

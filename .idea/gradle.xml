@@ -8,7 +8,11 @@
         <option name="modules">
           <set>
             <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/catalog" />
+            <option value="$PROJECT_DIR$/catalog-provider-api" />
             <option value="$PROJECT_DIR$/core" />
+            <option value="$PROJECT_DIR$/providers" />
+            <option value="$PROJECT_DIR$/providers/modrinth" />
             <option value="$PROJECT_DIR$/ui-components" />
             <option value="$PROJECT_DIR$/updater" />
           </set>

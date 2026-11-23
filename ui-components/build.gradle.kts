@@ -10,6 +10,7 @@ version = "1.0-SNAPSHOT"
 
 
 dependencies {
+    testImplementation(kotlin("test-junit"))
     implementation(project(":core"))
     implementation(compose.desktop.currentOs)
     implementation("org.jetbrains.compose.material3:material3:1.9.0")
