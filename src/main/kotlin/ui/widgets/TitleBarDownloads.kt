@@ -25,14 +25,12 @@ import androidx.compose.ui.unit.dp
 import funlauncher.net.DownloadManager
 import funlauncher.Theme
 import kotlinx.coroutines.delay
-import org.jetbrains.jewel.window.TitleBarScope
-import org.jetbrains.jewel.window.utils.clientRegion
 import ui.viewmodel.AppViewModel
 
 @Composable
-fun TitleBarScope.TitleBarDownloads(viewModel: AppViewModel, theme: Theme) {
+fun TitleBarDownloads(viewModel: AppViewModel, theme: Theme, modifier: Modifier, clientRegion: Modifier.(String) -> Modifier) {
     val isDark = when (theme) {
-        Theme.System -> rememberSystemDarkTheme()
+        Theme.System, Theme.Acrylic -> rememberSystemDarkTheme()
         Theme.Light -> false
         Theme.Dark -> true
     }
@@ -54,7 +52,7 @@ fun TitleBarScope.TitleBarDownloads(viewModel: AppViewModel, theme: Theme) {
         }
     }
     // End alignment respects the space reserved by Jewel for window controls.
-    Box(Modifier.align(Alignment.End).padding(horizontal = 8.dp)) {
+    Box(modifier.padding(horizontal = 8.dp)) {
         MaterialTheme(colorScheme = if (isDark) darkColorScheme() else lightColorScheme()) {
             AnimatedContent(
                 targetState = isDownloading,

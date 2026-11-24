@@ -28,7 +28,7 @@ import funlauncher.Theme
 fun ThemePicker(current: Theme, enabled: Boolean, onSelect: (Theme) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth().selectableGroup()) {
         val compact = maxWidth < 420.dp
-        val choices = listOf(Theme.System to "Как в системе", Theme.Light to "Светлая", Theme.Dark to "Тёмная")
+        val choices = ui.theme.availableThemes.map { it to ui.theme.themeLabel(it) }
         if (compact) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 choices.forEach { (theme, title) ->
@@ -62,7 +62,7 @@ private fun ThemeOption(theme: Theme, title: String, selected: Boolean, enabled:
                 when (theme) {
                     Theme.Light -> windowPreview(false)
                     Theme.Dark -> windowPreview(true)
-                    Theme.System -> {
+                    Theme.System, Theme.Acrylic -> {
                         clipRect(right = size.width / 2) { windowPreview(false) }
                         clipRect(left = size.width / 2) { windowPreview(true) }
                     }

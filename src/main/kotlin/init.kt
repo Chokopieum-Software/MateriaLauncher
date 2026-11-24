@@ -8,14 +8,16 @@
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.intui.standalone.theme.darkThemeDefinition
 import org.jetbrains.jewel.intui.standalone.theme.lightThemeDefinition
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.input.key.KeyEvent
+import org.jetbrains.jewel.window.utils.clientRegion
+import ui.theme.availableThemes
+import ui.theme.enableWindowsAcrylic
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import funlauncher.*
@@ -41,7 +43,6 @@ import ui.theme.AnimatedAppTheme
 import ui.viewmodel.AppViewModel
 import ui.widgets.ImageLoader
 import org.jetbrains.jewel.intui.standalone.theme.IntUiTheme
-import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.window.DecoratedWindow
 import org.jetbrains.jewel.window.TitleBar
 import java.util.*
@@ -249,7 +250,7 @@ private fun runApplication(isUiTest: Boolean) {
         val isDarkTheme = when (theme) {
             Theme.Light -> false
             Theme.Dark -> true
-            Theme.System -> rememberSystemDarkTheme()
+            Theme.System, Theme.Acrylic -> rememberSystemDarkTheme()
         }
         val themeDefinition = if (isDarkTheme) {
             JewelTheme.darkThemeDefinition()
@@ -258,36 +259,23 @@ private fun runApplication(isUiTest: Boolean) {
         }
 
         IntUiTheme(theme = themeDefinition, styling = ComponentStyling.decoratedWindow(), swingCompatMode = true) {
-            DecoratedWindow(
-                onCloseRequest = {
-                    scope.launch {
-                        viewModel?.cancelScope()
-                        exitApplication()
-                    }
-                },
-                title = "Materia",
-                icon = icon,
-                state = rememberWindowState(width = 1280.dp, height = 720.dp, placement = WindowPlacement.Maximized),
-                onKeyEvent = {
-                    if (it.isCtrlPressed && it.key == Key.Grave && it.type == KeyEventType.KeyDown) {
-                        LogCollector.saveLogsToDesktop()
-                        true
-                    } else {
-                        false
-                    }
+            val windowState = rememberWindowState(width = 1280.dp, height = 720.dp, placement = WindowPlacement.Maximized)
+            val close = {
+                viewModel?.cancelScope()
+                exitApplication()
+            }
+            val handleKey: (KeyEvent) -> Boolean = {
+                if (it.isCtrlPressed && it.key == Key.Grave && it.type == KeyEventType.KeyDown) {
+                    LogCollector.saveLogsToDesktop()
+                    true
+                } else {
+                    false
                 }
-            ) {
-                SideEffect {
-                    window.minimumSize = java.awt.Dimension(1280, 720)
-                }
-                TitleBar {
-                    if (homeViewModel != null && viewModel != null) {
-                        TitleBarActions(homeViewModel, theme)
-                        TitleBarDownloads(viewModel, theme)
-                    }
-                }
-                AnimatedAppTheme(theme) {
-                    androidx.compose.material3.Surface(modifier = Modifier.fillMaxSize()) {
+            }
+            val content: @Composable (Boolean) -> Unit = { acrylic ->
+                AnimatedAppTheme(theme, acrylicActive = acrylic) {
+                    androidx.compose.material3.Surface(modifier = Modifier.fillMaxSize(),
+                        color = if (acrylic) Color.Transparent else androidx.compose.material3.MaterialTheme.colorScheme.surface) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             if (currentScreen == Screen.FirstRunWizard) {
                                 Box(Modifier.widthIn(max = 600.dp)) {
@@ -321,6 +309,25 @@ private fun runApplication(isUiTest: Boolean) {
                         }
                     }
                 }
+            }
+            DecoratedWindow(onCloseRequest = close, state = windowState, title = "Materia",
+                icon = icon, onKeyEvent = handleKey) {
+                SideEffect { window.minimumSize = java.awt.Dimension(1280, 720) }
+                val useAcrylic = theme == Theme.Acrylic && theme in availableThemes &&
+                    windowState.placement != WindowPlacement.Fullscreen && !windowState.isMinimized
+                var acrylicActive by remember(window, useAcrylic, isDarkTheme) { mutableStateOf(false) }
+                DisposableEffect(window, useAcrylic, isDarkTheme) {
+                    val restore = if (useAcrylic) enableWindowsAcrylic(window, isDarkTheme) else null
+                    acrylicActive = restore != null
+                    onDispose { restore?.invoke() }
+                }
+                TitleBar {
+                    if (homeViewModel != null && viewModel != null) {
+                        TitleBarActions(homeViewModel, theme, Modifier.align(Alignment.Start)) { clientRegion(it) }
+                        TitleBarDownloads(viewModel, theme, Modifier.align(Alignment.End)) { clientRegion(it) }
+                    }
+                }
+                content(acrylicActive)
             }
         }
     }

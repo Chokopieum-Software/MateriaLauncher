@@ -128,14 +128,14 @@ fun FirstRunWizard(
                                     Column(Modifier.padding(16.dp)) {
                                         Text("Тема", style = MaterialTheme.typography.titleMedium)
                                         Spacer(modifier = Modifier.height(8.dp))
-                                        val themeOptions = Theme.values().map { it.name }
+                                        val themeOptions = ui.theme.availableThemes
                                         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                            themeOptions.forEachIndexed { index, label ->
+                                            themeOptions.forEachIndexed { index, option ->
                                                 SegmentedButton(
                                                     shape = SegmentedButtonDefaults.itemShape(index = index, count = themeOptions.size),
-                                                    onClick = { onThemeChange(Theme.values()[index]) },
-                                                    selected = initialTheme.name == label
-                                                ) { Text(label) }
+                                                    onClick = { onThemeChange(option) },
+                                                    selected = initialTheme == option
+                                                ) { Text(ui.theme.themeLabel(option)) }
                                             }
                                         }
                                     }

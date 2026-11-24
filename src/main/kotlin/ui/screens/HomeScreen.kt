@@ -63,8 +63,6 @@ import kotlinx.coroutines.launch
 import org.chokopieum.software.materia_launcher.generated.resources.Res
 import org.chokopieum.software.materia_launcher.generated.resources.monocraft
 import org.jetbrains.compose.resources.Font
-import org.jetbrains.jewel.window.TitleBarScope
-import org.jetbrains.jewel.window.utils.clientRegion
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import ui.viewmodel.HomeViewModel
@@ -219,12 +217,14 @@ fun HomeScreen(
 }
 
 @Composable
-fun TitleBarScope.TitleBarActions(
+fun TitleBarActions(
     viewModel: HomeViewModel,
-    theme: Theme = viewModel.globalSettings.theme
+    theme: Theme,
+    modifier: Modifier,
+    clientRegion: Modifier.(String) -> Modifier
 ) {
     val isDark = when(theme) {
-        Theme.System -> ui.theme.rememberSystemDarkTheme()
+        Theme.System, Theme.Acrylic -> ui.theme.rememberSystemDarkTheme()
         Theme.Light -> false
         Theme.Dark -> true
     }
@@ -234,7 +234,7 @@ fun TitleBarScope.TitleBarActions(
 
     val colorScheme = if (isDark) darkColorScheme() else lightColorScheme()
 
-    Box(modifier = Modifier.align(Alignment.Start)) {
+    Box(modifier = modifier) {
         Row(
             modifier = Modifier
                 .padding(horizontal = 8.dp)

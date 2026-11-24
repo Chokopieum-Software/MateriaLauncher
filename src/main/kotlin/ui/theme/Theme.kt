@@ -17,10 +17,11 @@ import funlauncher.Theme
 @Composable
 fun AnimatedAppTheme(
     theme: Theme,
+    acrylicActive: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val useDarkTheme = when (theme) {
-        Theme.System -> rememberSystemDarkTheme()
+        Theme.System, Theme.Acrylic -> rememberSystemDarkTheme()
         Theme.Light -> false
         Theme.Dark -> true
     }
@@ -43,7 +44,7 @@ fun AnimatedAppTheme(
         colorScheme = colors
     ) {
         Box(
-            modifier = Modifier.fillMaxSize().background(backgroundColor)
+            modifier = Modifier.fillMaxSize().background(if (acrylicActive) Color.Transparent else backgroundColor)
         ) {
             content()
         }

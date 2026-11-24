@@ -43,7 +43,6 @@ import org.chokopieum.software.materia_launcher.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
 import state.AppState
 import ui.screens.*
-import ui.theme.AnimatedAppTheme
 import ui.viewmodel.AppViewModel
 import ui.viewmodel.HomeViewModel
 
@@ -74,7 +73,7 @@ fun App(
 
 
     // Основная тема и разметка приложения.
-    AnimatedAppTheme(appState.settings.theme) {
+    Box(Modifier.fillMaxSize()) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             containerColor = Color.Transparent // Делаем фон Scaffold прозрачным

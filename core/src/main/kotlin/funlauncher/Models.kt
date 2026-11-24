@@ -48,7 +48,7 @@ data class AppSettings(
 )
 
 enum class Theme {
-    System, Light, Dark
+    System, Light, Dark, Acrylic
 }
 
 data class JavaInfo(
