@@ -30,12 +30,11 @@ internal fun InlineVersionPicker(
     val listState = rememberLazyListState()
     LaunchedEffect(category) { listState.scrollToItem(0) }
     Column {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(selected?.let { "Minecraft ${it.id}" } ?: "Версия Minecraft", style = MaterialTheme.typography.titleMedium)
-            if (selected != null) TextButton(onClick = { onExpandedChange(!expanded) }) {
-                Text(if (expanded) "Свернуть" else "Изменить")
-            }
-        }
+        PickerHeader(
+            title = selected?.let { "Minecraft ${it.id}" } ?: "Версия Minecraft",
+            expanded = expanded,
+            onToggle = if (selected == null) null else ({ onExpandedChange(!expanded) })
+        )
         AnimatedVisibility(expanded) {
             Column {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -64,6 +63,16 @@ internal fun InlineVersionPicker(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun PickerHeader(title: String, expanded: Boolean, onToggle: (() -> Unit)?) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        if (onToggle != null) TextButton(onClick = onToggle) {
+            Text(if (expanded) "Свернуть" else "Изменить")
         }
     }
 }

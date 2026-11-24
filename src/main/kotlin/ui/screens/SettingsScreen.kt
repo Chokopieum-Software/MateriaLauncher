@@ -54,6 +54,8 @@ import funlauncher.utils.validateLaunchOptions
 import java.lang.management.ManagementFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import funlauncher.update.LauncherChangelog
+import ui.dialogs.LauncherChangelogDialog
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
@@ -460,6 +462,10 @@ private fun CacheSettings(cacheManager: CacheManager) {
 
 @Composable
 private fun AboutScreen(onExitForUpdate: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var latestChangelog by remember { mutableStateOf<LauncherChangelog?>(null) }
+    var showChangelog by remember { mutableStateOf(false) }
+    if (showChangelog) LauncherChangelogDialog(latestChangelog) { showChangelog = false }
     var showTechInfo by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
@@ -497,6 +503,12 @@ private fun AboutScreen(onExitForUpdate: () -> Unit) {
                 }
             }
             LauncherUpdateCard(onExitForUpdate)
+            OutlinedButton(onClick = {
+                scope.launch {
+                    latestChangelog = withContext(Dispatchers.IO) { LauncherChangelog.latest() }
+                    showChangelog = true
+                }
+            }) { Text("Что нового") }
             OutlinedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                 TextButton(onClick = { showTechInfo = !showTechInfo }, modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(16.dp)) {

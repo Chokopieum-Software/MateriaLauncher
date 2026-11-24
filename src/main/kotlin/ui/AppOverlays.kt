@@ -17,6 +17,7 @@ fun AppOverlays(
     appState: AppState,
     pathManager: PathManager
 ) {
+    LauncherChangelogDialog()
     if (viewModel.showJavaManagerWindow) {
         JavaManagerWindow(
             onCloseRequest = { viewModel.showJavaManagerWindow = false },

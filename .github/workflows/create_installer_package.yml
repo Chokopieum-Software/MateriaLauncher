@@ -23,6 +23,8 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
 
       # Use the same SDK as local builds; the major-version resolver selected an older JBR.
       - name: Download pinned JBR SDK

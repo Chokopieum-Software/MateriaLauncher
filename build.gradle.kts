@@ -254,7 +254,11 @@ val prepareUiResources by tasks.registering(Sync::class) {
         into("drawable")
         rename { "materia_logo.png" }
     }
-    from("src/main/composeResources") { exclude("drawable/cover/**") }
+    from("src/main/composeResources") { exclude("drawable/cover/**", "drawable/ico/**") }
+    from("src/main/composeResources/drawable/ico") {
+        into("drawable")
+        rename { "loader_$it" }
+    }
     into(layout.buildDirectory.dir("generated/uiResources"))
     includeEmptyDirs = false
 }
@@ -285,6 +289,19 @@ tasks.named<Copy>("processResources") {
     from(layout.buildDirectory.dir("generated/coverResources"))
     doLast {
         val props = Properties()
+        val history = file("$destinationDir/launcher-commits.tsv")
+        if (appBuildNumber.toLongOrNull() != null) {
+            val log = providers.exec {
+                workingDir(rootDir)
+                val trailers = listOf("Changelog-ru", "Changelog-en").joinToString("%x09") {
+                    "%(trailers:key=$it,valueonly,unfold=true,separator=%x20)"
+                }
+                commandLine("git", "log", "--topo-order", "--encoding=UTF-8", "--format=%H%x09%P%x09%s%x09$trailers", gitHash, "--")
+            }
+            history.writeBytes(log.standardOutput.asBytes.get())
+        } else {
+            history.writeText("")
+        }
         props.setProperty("version", appVersion)
         props.setProperty("channel", releaseChannel)
         props.setProperty("buildNumber", appBuildNumber)

@@ -10,6 +10,7 @@ package funlauncher.database
 
 import funlauncher.database.dao.Accounts
 import funlauncher.database.dao.Builds
+import funlauncher.update.LauncherBuildState
 import funlauncher.managers.PathManager
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
@@ -21,7 +22,7 @@ object DatabaseManager {
         Database.connect("jdbc:sqlite:${dbFile.toFile().absolutePath}", "org.sqlite.JDBC")
 
         transaction {
-            SchemaUtils.createMissingTablesAndColumns(Accounts, Builds)
+            SchemaUtils.createMissingTablesAndColumns(Accounts, Builds, LauncherBuildState)
         }
     }
 }

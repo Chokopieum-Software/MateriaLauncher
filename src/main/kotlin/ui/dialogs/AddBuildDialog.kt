@@ -10,15 +10,18 @@ package ui.dialogs
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import org.chokopieum.software.materia_launcher.generated.resources.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import ui.widgets.MorphingCreationPanel
-import androidx.compose.ui.graphics.Color
+import org.jetbrains.compose.resources.painterResource
 import androidx.compose.ui.unit.dp
 import funlauncher.*
 import funlauncher.game.*
@@ -38,6 +41,7 @@ fun AddBuildDialog(
     var selectedLoaderVersion by remember { mutableStateOf("") }
     var modLoader by remember { mutableStateOf(BuildType.VANILLA) }
 
+    var loaderListExpanded by remember { mutableStateOf(true) }
     var versionListExpanded by remember { mutableStateOf(true) }
     var versionsLoading by remember { mutableStateOf(true) }
     var versionsError by remember { mutableStateOf<String?>(null) }
@@ -146,6 +150,7 @@ fun AddBuildDialog(
                             selectedMcVersion = it
                             modLoader = BuildType.VANILLA
                             selectedLoaderVersion = ""
+                            loaderListExpanded = true
                             versionListExpanded = false
                         }
                     )
@@ -158,36 +163,35 @@ fun AddBuildDialog(
                     }
                     AnimatedVisibility(visible = selectedMcVersion?.supportsModLoaders() == true && !versionListExpanded) {
                         Column {
-                            Text("Загрузчик модов", style = MaterialTheme.typography.labelMedium)
-                            Spacer(Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(0.dp)
-                            ) {
-                                val types = BuildType.entries
-                                types.forEachIndexed { index, type ->
-                                    val shape = when (index) {
-                                        0 -> RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)
-                                        types.lastIndex -> RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp)
-                                        else -> RoundedCornerShape(0.dp)
-                                    }
-                                    val isSelected = modLoader == type
-                                    OutlinedButton(
-                                        onClick = { modLoader = type },
-                                        modifier = Modifier.weight(1f),
-                                        shape = shape,
-                                        border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline),
-                                        colors = ButtonDefaults.outlinedButtonColors(
-                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-                                        )
-                                    ) {
-                                        Text(type.name.lowercase().replaceFirstChar { it.uppercase() })
+                            PickerHeader(
+                                title = "Загрузчик модов · ${modLoader.pickerLabel}",
+                                expanded = loaderListExpanded,
+                                onToggle = { loaderListExpanded = !loaderListExpanded }
+                            )
+                            AnimatedVisibility(loaderListExpanded) {
+                                OutlinedCard {
+                                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 260.dp)) {
+                                        items(BuildType.entries) { type ->
+                                            ListItem(
+                                                headlineContent = { Text(type.pickerLabel) },
+                                                leadingContent = {
+                                                    Image(painterResource(type.pickerIcon), null, Modifier.size(32.dp))
+                                                },
+                                                trailingContent = {
+                                                    if (modLoader == type) Text("Выбрано", color = MaterialTheme.colorScheme.primary)
+                                                },
+                                                modifier = Modifier.clickable {
+                                                    modLoader = type
+                                                    loaderListExpanded = false
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
                             Spacer(Modifier.height(16.dp))
 
-                            if (modLoader != BuildType.VANILLA) {
+                            if (!loaderListExpanded && modLoader != BuildType.VANILLA) {
                                 var loaderExpanded by remember { mutableStateOf(false) }
                                 ExposedDropdownMenuBox(expanded = loaderExpanded, onExpandedChange = { loaderExpanded = !loaderExpanded }) {
                                     OutlinedTextField(
@@ -284,3 +288,15 @@ fun AddBuildDialog(
             }
     }
 }
+
+private val BuildType.pickerLabel: String
+    get() = if (this == BuildType.NEOFORGE) "NeoForge" else name.lowercase().replaceFirstChar { it.uppercase() }
+
+private val BuildType.pickerIcon
+    get() = when (this) {
+        BuildType.VANILLA -> Res.drawable.loader_vanilla
+        BuildType.FABRIC -> Res.drawable.loader_fabric
+        BuildType.FORGE -> Res.drawable.loader_forge
+        BuildType.QUILT -> Res.drawable.loader_quilt
+        BuildType.NEOFORGE -> Res.drawable.loader_neoforge
+    }
