@@ -26,29 +26,38 @@ internal data class LauncherChangelog(val previous: Long, val current: Long, val
             }
         }
 
-        fun onStartup(): LauncherChangelog? {
+        fun onStartup(existingInstallation: Boolean): LauncherChangelog? {
             val props = Properties()
             LauncherChangelog::class.java.getResourceAsStream("/app.properties")?.use(props::load)
             val number = props.getProperty("buildNumber")?.toLongOrNull() ?: return null
             val commit = props.getProperty("gitHash") ?: return null
-            return record(number, commit) { previousCommit ->
+            val releaseNumber = props.getProperty("previousReleaseBuild")?.toLongOrNull()
+            val releaseCommit = props.getProperty("previousReleaseCommit").orEmpty()
+            val release = if (releaseNumber != null && releaseNumber < number && releaseCommit.isNotBlank())
+                releaseNumber to releaseCommit else null
+            return record(number, commit, release, existingInstallation) { previousCommit ->
                 LauncherChangelog::class.java.getResourceAsStream("/launcher-commits.tsv")?.bufferedReader()?.use {
                     changesSince(previousCommit, it.lineSequence())
                 }.orEmpty()
             }
         }
 
-        internal fun record(number: Long, commit: String, changes: (String) -> List<String>): LauncherChangelog? = transaction {
+        internal fun record(
+            number: Long, commit: String, previousRelease: Pair<Long, String>? = null,
+            existingInstallation: Boolean = false, changes: (String) -> List<String>
+        ): LauncherChangelog? = transaction {
             val state = LauncherBuildState
             val previous = state.selectAll().singleOrNull()
             when {
                 previous == null -> {
+                    val notes = previousRelease?.let { (base, hash) -> LauncherChangelog(base, number, changes(hash)) }
                     state.insert {
                         it[id] = 1
                         it[state.number] = number
                         it[state.commit] = commit
+                        it[lastChangelog] = notes?.let { log -> Json.encodeToString(log) }
                     }
-                    null
+                    notes.takeIf { existingInstallation }
                 }
                 number <= previous[state.number] -> null
                 else -> {

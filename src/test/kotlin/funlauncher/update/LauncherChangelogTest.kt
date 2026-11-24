@@ -32,6 +32,30 @@ class LauncherChangelogTest {
     }
 
     @Test
+    fun savesReleaseNotesOnFreshAndLegacyInstallationsAndOnlyPromptsOnUpgrade() {
+        for (existing in listOf(false, true)) {
+            val file = Files.createTempFile("launcher-release", ".db")
+            val db = Database.connect("jdbc:sqlite:$file", "org.sqlite.JDBC")
+            try {
+                transaction(db) { SchemaUtils.create(LauncherBuildState) }
+                val expected = LauncherChangelog(38, 41, listOf("Release notes"))
+                val prompt = LauncherChangelog.record(41, "new", 38L to "old", existing) {
+                    assertEquals("old", it)
+                    expected.changes
+                }
+                assertEquals(if (existing) expected else null, prompt)
+                assertEquals(expected, LauncherChangelog.latest())
+                assertNull(LauncherChangelog.record(41, "new", 38L to "old", true) { error("Repeated read") })
+                val next = LauncherChangelog.record(45, "latest", 44L to "skipped", true) { listOf(it) }
+                assertEquals(LauncherChangelog(41, 45, listOf("new")), next)
+            } finally {
+                TransactionManager.closeAndUnregister(db)
+                Files.deleteIfExists(file)
+            }
+        }
+    }
+
+    @Test
     fun prefersBilingualNotesAndFallsBackToCommitSubjects() {
         val history = sequenceOf("c\tb\tInternal title\tКнопка в настройках\tButton in Settings",
             "b\ta\tLegacy title\t\t", "a\t\tRoot\t\t")

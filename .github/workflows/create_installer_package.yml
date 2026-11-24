@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: windows-installers-${{ github.ref }}
@@ -25,6 +26,21 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Identify previous published build for release notes
+        if: github.ref == 'refs/heads/sunrise-dev' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/create_installer_package.yml/runs?branch=sunrise-dev&status=success&per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read previous builds' }
+          $previous = ($json | ConvertFrom-Json).workflow_runs | Where-Object {
+            $_.event -ne 'pull_request' -and $_.run_number -lt [long]$env:GITHUB_RUN_NUMBER
+          } | Sort-Object run_number -Descending | Select-Object -First 1
+          if ($previous) {
+            "PREVIOUS_RELEASE_BUILD=$($previous.run_number)" >> $env:GITHUB_ENV
+            "PREVIOUS_RELEASE_COMMIT=$($previous.head_sha)" >> $env:GITHUB_ENV
+          }
 
       # Use the same SDK as local builds; the major-version resolver selected an older JBR.
       - name: Download pinned JBR SDK

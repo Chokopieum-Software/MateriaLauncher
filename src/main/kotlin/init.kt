@@ -30,6 +30,8 @@ import funlauncher.managers.JavaManager
 import funlauncher.managers.PathManager
 import funlauncher.net.JavaDownloader
 import funlauncher.utils.LogCollector
+import funlauncher.update.LauncherChangelog
+import ui.dialogs.LauncherChangelogDialog
 import kotlinx.coroutines.*
 import org.chokopieum.software.materia_launcher.generated.resources.*
 import org.jetbrains.compose.resources.ExperimentalResourceApi
@@ -157,7 +159,7 @@ private fun runApplication(isUiTest: Boolean) {
     val splash = createAndShowSplashScreen(statusLabel)
 
     globalPathManager = PathManager(PathManager.getDefaultAppDataDirectory())
-    val initialSettings = runBlocking(Dispatchers.IO) {
+    val (initialSettings, startupChangelog) = runBlocking(Dispatchers.IO) {
         SwingUtilities.invokeLater { statusLabel.text = "Loading configuration..." }
         globalPathManager.createRequiredDirectories()
         DatabaseManager.init(globalPathManager)
@@ -174,7 +176,7 @@ private fun runApplication(isUiTest: Boolean) {
         globalVersionMetadataFetcher = VersionMetadataFetcher(globalBuildManager, globalPathManager)
 
         ImageLoader.init(globalCacheManager)
-        settings
+        settings to LauncherChangelog.onStartup(existingInstallation = settings.setupCompleted)
     }
 
     CoroutineScope(Dispatchers.IO).launch {
@@ -189,6 +191,7 @@ private fun runApplication(isUiTest: Boolean) {
     }
 
     application {
+        var changelog by remember { mutableStateOf(startupChangelog) }
         var currentScreen by remember { mutableStateOf<Screen>(Screen.Splash) }
         var appState by remember { mutableStateOf<AppState?>(null) }
         val scope = rememberCoroutineScope()
@@ -302,6 +305,7 @@ private fun runApplication(isUiTest: Boolean) {
                                         exitApplication()
                                     }
                                 )
+                                changelog?.let { LauncherChangelogDialog(it) { changelog = null } }
                             }
                         }
                         if (currentScreen != Screen.Splash) {

@@ -11,17 +11,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import funlauncher.update.LauncherChangelog
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-@Composable
-internal fun LauncherChangelogDialog() {
-    var changelog by remember { mutableStateOf<LauncherChangelog?>(null) }
-    LaunchedEffect(Unit) {
-        changelog = withContext(Dispatchers.IO) { LauncherChangelog.onStartup() }
-    }
-    changelog?.let { LauncherChangelogDialog(it) { changelog = null } }
-}
 
 @Composable
 internal fun LauncherChangelogDialog(update: LauncherChangelog?, onDismiss: () -> Unit) {
@@ -31,7 +20,7 @@ internal fun LauncherChangelogDialog(update: LauncherChangelog?, onDismiss: () -
         text = {
             if (update == null) Text("Пока нет сохранённого списка изменений.") else
             LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { Text("Предыдущая сборка — №${update.previous}") }
+                item { Text("Изменения после сборки №${update.previous}") }
                 if (update.changes.isEmpty()) item { Text("Новых коммитов нет.") }
                 items(update.changes) { Text("• $it") }
             }
