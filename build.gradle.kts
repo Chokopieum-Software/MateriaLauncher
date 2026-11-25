@@ -175,6 +175,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.11.0")
     implementation("com.microsoft.azure:msal4j:1.26.0")
+    implementation("com.microsoft.azure:msal4j-brokers:1.0.0")
     implementation("com.github.javakeyring:java-keyring:1.0.4")
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
     implementation("com.google.code.gson:gson:2.15.0")

@@ -4,6 +4,11 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 import com.microsoft.aad.msal4j.*
+import com.microsoft.aad.msal4jbrokers.Broker
+import com.sun.jna.Native
+import com.sun.jna.Platform
+import java.awt.Window
+import java.net.URI
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -11,8 +16,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 class MateriaAuthenticator {
-    companion object { val sessionLock = Any() }
+    companion object {
+        val sessionLock = Any()
+        private const val WAM_PREFIX = "wam:"
+    }
     private val scopes = setOf("XboxLive.Signin", "offline_access")
+    private val windowsScopes = scopes + "openid"
     private val client = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build()
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -31,32 +40,74 @@ class MateriaAuthenticator {
         .authority("https://login.microsoftonline.com/consumers/")
         .setTokenCacheAccessAspect(tokenCacheAspect).build()
 
+    private val windowsBroker by lazy { Broker.Builder().supportWindows(true).build() }
+
     fun login(): MinecraftProfile {
+        if (Platform.isWindows()) {
+            val result = try {
+                acquireWindowsToken()
+            } catch (_: Exception) {
+                null
+            } catch (_: LinkageError) {
+                null // Native runtime missing or incompatible.
+            }
+            if (result != null) {
+                MicrosoftLoginWindow.focus()
+                return profile(result, WAM_PREFIX)
+            }
+        }
         MicrosoftCallback.ensureRegistered()
         return profile(acquireTokenInteractive())
+    }
+
+    private fun acquireWindowsToken(): IAuthenticationResult? {
+        val windows = Window.getWindows().filter { it.isShowing }
+        val owner = windows.firstOrNull { it.isActive } ?: windows.lastOrNull() ?: return null
+        if (!windowsBroker.isBrokerAvailable) return null
+        val redirect = URI("ms-appx-web://Microsoft.AAD.BrokerPlugin/${MicrosoftCallback.CLIENT_ID}")
+        val parameters = InteractiveRequestParameters.builder(redirect)
+            .windowHandle(Native.getWindowID(owner)).scopes(windowsScopes).build()
+        return windowsBroker.acquireToken(app, parameters).join().takeIf {
+            !it.accessToken().isNullOrBlank() && !it.account()?.homeAccountId().isNullOrBlank()
+        }
+    }
+
+    // WAM keeps its own account cache and looks up silent requests by home account ID.
+    private class WindowsAccount(private val id: String) : IAccount {
+        override fun homeAccountId() = id
+        override fun environment() = "login.microsoftonline.com"
+        override fun username() = ""
+        override fun getTenantProfiles() = emptyMap<String, ITenantProfile>()
     }
 
     /** Refresh for the exact Microsoft account associated with this Minecraft UUID. */
     fun refresh(uuid: String): MinecraftProfile {
         val homeId = SecureAuthStore.get("Minecraft:$uuid")
             ?: error("Для этого аккаунта требуется повторный вход Microsoft.")
-        val account = app.accounts.join().firstOrNull { it.homeAccountId() == homeId }
+        val brokerSession = homeId.startsWith(WAM_PREFIX)
+        val account = if (brokerSession) WindowsAccount(homeId.removePrefix(WAM_PREFIX))
+            else app.accounts.join().firstOrNull { it.homeAccountId() == homeId }
             ?: error("Сессия Microsoft отсутствует. Войдите в аккаунт повторно.")
         val result = try {
-            app.acquireTokenSilently(SilentParameters.builder(scopes, account).build()).join()
+            val params = SilentParameters.builder(if (brokerSession) windowsScopes else scopes, account).build()
+            if (brokerSession) {
+                check(windowsBroker.isBrokerAvailable)
+                windowsBroker.acquireToken(app, params).join()
+            } else app.acquireTokenSilently(params).join()
         } catch (e: Exception) {
             throw IllegalStateException("Не удалось обновить сессию Microsoft. Проверьте сеть или войдите повторно.", e)
         }
-        val profile = profile(result)
+        check(result.account().homeAccountId() == homeId.removePrefix(WAM_PREFIX))
+        val profile = profile(result, if (brokerSession) WAM_PREFIX else "")
         check(profile.id == uuid) { "Microsoft вернул другой профиль Minecraft. Войдите повторно." }
         return profile
     }
 
-    private fun profile(result: IAuthenticationResult): MinecraftProfile {
+    private fun profile(result: IAuthenticationResult, prefix: String = ""): MinecraftProfile {
         val xbox = authXboxLive(result.accessToken())
         val xsts = authXSTS(xbox.token)
         val profile = getMinecraftProfile(authMinecraft(xsts.userHash, xsts.token))
-        SecureAuthStore.set("Minecraft:${profile.id}", result.account().homeAccountId())
+        SecureAuthStore.set("Minecraft:${profile.id}", prefix + result.account().homeAccountId())
         return profile
     }
 
@@ -69,7 +120,9 @@ class MateriaAuthenticator {
     fun forget(uuid: String) {
         val homeId = SecureAuthStore.get("Minecraft:$uuid")
         if (homeId != null) {
-            app.accounts.join().firstOrNull { it.homeAccountId() == homeId }?.let { app.removeAccount(it).join() }
+            if (!homeId.startsWith(WAM_PREFIX)) {
+                app.accounts.join().firstOrNull { it.homeAccountId() == homeId }?.let { app.removeAccount(it).join() }
+            }
             SecureAuthStore.delete("Minecraft:$uuid")
         }
     }

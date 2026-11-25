@@ -46,6 +46,9 @@ object MicrosoftCallback {
             Socket().use { socket ->
                 socket.connect(java.net.InetSocketAddress(InetAddress.getLoopbackAddress(), port), 3000)
                 socket.soTimeout = 3000
+                runCatching {
+                    MicrosoftLoginWindow.allowForeground(Files.readString(directory.resolve("$state.pid")).toInt())
+                }
                 java.io.DataOutputStream(socket.getOutputStream()).writeUTF(value)
             }
         }
@@ -65,8 +68,10 @@ object MicrosoftCallback {
         Files.createDirectories(callbackDirectory)
         ServerSocket(0, 8, InetAddress.getLoopbackAddress()).use { server ->
             val endpoint = callbackDirectory.resolve("$state.port")
+            val processFile = callbackDirectory.resolve("$state.pid")
             Files.writeString(endpoint, server.localPort.toString())
             try {
+                Files.writeString(processFile, ProcessHandle.current().pid().toString())
                 openBrowser()
                 val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(3)
                 while (System.nanoTime() < deadline) {
@@ -76,6 +81,7 @@ object MicrosoftCallback {
                         runCatching { parameters(java.io.DataInputStream(socket.getInputStream()).readUTF()) }.getOrNull()
                     } ?: continue
                     if (response["state"] != state) continue
+                    MicrosoftLoginWindow.focus()
                     if (response.containsKey("error")) throw IllegalStateException("Вход Microsoft отменён или отклонён (${response["error"]}).")
                     return response["code"]?.takeIf { it.isNotBlank() }
                         ?: throw IllegalStateException("Microsoft не вернул код авторизации.")
@@ -85,6 +91,7 @@ object MicrosoftCallback {
                 error("Время ожидания входа Microsoft истекло. Попробуйте ещё раз.")
             } finally {
                 Files.deleteIfExists(endpoint)
+                Files.deleteIfExists(processFile)
             }
         }
     }

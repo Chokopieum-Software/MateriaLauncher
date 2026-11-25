@@ -63,11 +63,21 @@ class CatalogProviderTest {
             vm.selectBuild(MinecraftBuild("Fabric", "fabric-loader-0.16.1-1.21", BuildType.FABRIC, "unused"))
             assertEquals(listOf("1.21"), vm.searchRequest(0).versions)
             assertEquals(listOf("fabric"), vm.searchRequest(1).loaders)
+            val fabric = vm.selectedBuild
+            vm.selectedType = ModificationType.MODPACKS
+            assertNull(vm.filterBuild)
+            assertEquals(listOf("1.18"), vm.searchRequest(0).versions)
+            assertEquals(listOf("forge"), vm.searchRequest(1).loaders)
+            assertEquals(listOf("quilt"), vm.searchRequest(0).excludedLoaders)
+            vm.selectedType = ModificationType.MODS
+            assertSame(fabric, vm.filterBuild)
+            assertEquals(listOf("1.21"), vm.searchRequest(0).versions)
+            assertEquals(listOf("fabric"), vm.searchRequest(0).loaders)
             vm.selectBuild(MinecraftBuild("Vanilla", "1.20.4", BuildType.VANILLA, "unused"))
             assertEquals(ModificationType.RESOURCE_PACKS, vm.selectedType)
             assertFalse(ModificationType.MODS in vm.availableTypes)
             assertFalse(ModificationType.SHADERS in vm.availableTypes)
-            for (type in vm.availableTypes) {
+            for (type in vm.availableTypes - ModificationType.MODPACKS) {
                 vm.selectedType = type
                 val request = vm.searchRequest(0)
                 assertEquals(listOf("1.20.4"), request.versions)

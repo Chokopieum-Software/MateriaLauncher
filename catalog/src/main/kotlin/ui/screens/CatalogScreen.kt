@@ -142,6 +142,14 @@ private fun ProviderCatalog(
         viewModel.filterCategoriesAndLoaders()
     }
 
+    var searchText by remember(viewModel) { mutableStateOf(viewModel.searchQuery) }
+    LaunchedEffect(viewModel, searchText) {
+        if (searchText != viewModel.searchQuery) {
+            delay(1_500)
+            viewModel.searchQuery = searchText
+        }
+    }
+
     LaunchedEffect(
         viewModel.searchQuery,
         viewModel.selectedBuild,
@@ -203,7 +211,7 @@ private fun ProviderCatalog(
             addToCart = viewModel.selectedType.usesCart,
             loading = viewModel.isLoadingProjectDetails,
             error = viewModel.projectDetailsError,
-            versions = viewModel.selectedBuild?.let { build ->
+            versions = viewModel.filterBuild?.let { build ->
                 viewModel.projectVersions.filter { ModificationInstaller.isCompatible(it, build, viewModel.selectedType.installDir) }
             } ?: viewModel.projectVersions,
             onDismissRequest = ::closeVersions,
@@ -273,10 +281,12 @@ private fun ProviderCatalog(
             TopAppBar(
                 title = {
                     OutlinedTextField(
-                        value = viewModel.searchQuery,
-                        onValueChange = { viewModel.searchQuery = it },
+                        shape = RoundedCornerShape(percent = 50),
+                        value = searchText,
+                        onValueChange = { searchText = it },
                         placeholder = { Text(stringResource(Res.string.search_placeholder)) },
-                        modifier = Modifier.fillMaxWidth(0.6f).padding(end = 16.dp),
+                        modifier = Modifier.fillMaxWidth(0.6f).padding(end = 16.dp).height(52.dp),
+                        textStyle = MaterialTheme.typography.bodyMedium,
                         singleLine = true,
                         leadingIcon = {
                             IconButton(onClick = { viewModel.isFilterPanelVisible = !viewModel.isFilterPanelVisible }) {
@@ -289,10 +299,12 @@ private fun ProviderCatalog(
                     )
                 },
                 actions = {
-                    TextButton(onClick = { showingCart = true }) { Text("Корзина (${cart.items.size})") }
-                    OutlinedButton(onClick = { pickingBuild = true }) {
-                        Text(viewModel.selectedBuild?.name ?: "Выбрать сборку", maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 220.dp))
+                    if (viewModel.selectedType != ModificationType.MODPACKS) {
+                        TextButton(onClick = { showingCart = true }) { Text("Корзина (${cart.items.size})") }
+                        OutlinedButton(onClick = { pickingBuild = true }) {
+                            Text(viewModel.selectedBuild?.name ?: "Выбрать сборку", maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 220.dp))
+                        }
                     }
                     if (providers.size > 1) {
                         var expanded by remember { mutableStateOf(false) }

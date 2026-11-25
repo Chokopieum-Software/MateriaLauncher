@@ -41,6 +41,8 @@ class ModificationsViewModel(
     var currentPage by mutableStateOf(0)
     val pageSize = 20
     var isLoadingMore by mutableStateOf(false)
+    var pageLoadFailed by mutableStateOf(false)
+        private set
     var hasMoreResults by mutableStateOf(true)
 
     var selectedProject by mutableStateOf<Project?>(null)
@@ -203,6 +205,9 @@ class ModificationsViewModel(
     var selectedBuild by mutableStateOf<MinecraftBuild?>(null)
         private set
 
+    internal val filterBuild: MinecraftBuild?
+        get() = if (selectedType == ModificationType.MODPACKS) null else selectedBuild
+
     val availableTypes: List<ModificationType>
         get() = ModificationType.entries.filter {
             selectedBuild?.type != BuildType.VANILLA || it !in listOf(ModificationType.MODS, ModificationType.SHADERS)
@@ -215,20 +220,20 @@ class ModificationsViewModel(
     }
 
     private val buildLoader: String?
-        get() = selectedBuild?.type?.takeUnless { it == BuildType.VANILLA }?.name?.lowercase()?.takeIf {
-            selectedType == ModificationType.MODS || selectedType == ModificationType.MODPACKS
+        get() = filterBuild?.type?.takeUnless { it == BuildType.VANILLA }?.name?.lowercase()?.takeIf {
+            selectedType == ModificationType.MODS
         }
 
     internal fun searchRequest(page: Int) = CatalogSearch(
         query = searchQuery,
         projectType = selectedType.projectType,
-        versions = selectedBuild?.let { listOf(ModificationInstaller.minecraftVersion(it)) } ?: selectedVersions.toList(),
+        versions = filterBuild?.let { listOf(ModificationInstaller.minecraftVersion(it)) } ?: selectedVersions.toList(),
         categories = selectedCategories.filterValues { it == FilterState.INCLUDED }.keys.toList(),
-        loaders = if (selectedBuild != null) listOfNotNull(buildLoader) else selectedLoaders.filterValues { it == FilterState.INCLUDED }.keys.toList(),
+        loaders = if (filterBuild != null) listOfNotNull(buildLoader) else selectedLoaders.filterValues { it == FilterState.INCLUDED }.keys.toList(),
         offset = page * pageSize,
         limit = pageSize,
         excludedCategories = selectedCategories.filterValues { it == FilterState.EXCLUDED }.keys.toList(),
-        excludedLoaders = if (selectedBuild != null) emptyList() else selectedLoaders.filterValues { it == FilterState.EXCLUDED }.keys.toList()
+        excludedLoaders = if (filterBuild != null) emptyList() else selectedLoaders.filterValues { it == FilterState.EXCLUDED }.keys.toList()
     )
 
     private var searchJob: Job? = null
@@ -238,6 +243,7 @@ class ModificationsViewModel(
         searchJob?.cancel()
         pageJob?.cancel()
         isLoadingMore = false
+        pageLoadFailed = false
         isLoading = true
         searchResult = null
         currentPage = 0
@@ -267,6 +273,7 @@ class ModificationsViewModel(
         if (isLoadingMore || !hasMoreResults || isLoading) return
 
         isLoadingMore = true
+        pageLoadFailed = false
         currentPage++
 
         val request = searchRequest(currentPage)
@@ -286,6 +293,7 @@ class ModificationsViewModel(
                 throw e
             } catch (e: Exception) {
                 currentPage--
+                pageLoadFailed = true
             } finally {
                 if (kotlinx.coroutines.currentCoroutineContext().isActive) isLoadingMore = false
             }

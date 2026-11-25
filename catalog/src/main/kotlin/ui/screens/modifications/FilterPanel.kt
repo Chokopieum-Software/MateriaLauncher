@@ -50,10 +50,10 @@ fun FilterPanel(
             .verticalScroll(rememberScrollState())
     ) {
 
-        val build = viewModel.selectedBuild
+        val build = viewModel.filterBuild
         if (build != null) {
             Text("Minecraft ${funlauncher.net.ModificationInstaller.minecraftVersion(build)} · ${build.type.name}",
-                style = MaterialTheme.typography.titleSmall)
+                style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
         } else Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
@@ -85,11 +85,17 @@ fun FilterPanel(
             modifier = Modifier.fillMaxWidth().clickable { viewModel.categoriesExpanded = !viewModel.categoriesExpanded },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(stringResource(Res.string.categories), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(
+                stringResource(Res.string.categories),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurface
+            )
             IconButton(onClick = { viewModel.categoriesExpanded = !viewModel.categoriesExpanded }) {
                 Icon(
                     imageVector = if (viewModel.categoriesExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (viewModel.categoriesExpanded) "Свернуть категории" else "Развернуть категории"
+                    contentDescription = if (viewModel.categoriesExpanded) "Свернуть категории" else "Развернуть категории",
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
@@ -182,7 +188,8 @@ fun FilterPanel(
             ) {
                 Icon(
                     imageVector = if (viewModel.loadersExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (viewModel.loadersExpanded) "Свернуть загрузчики" else "Развернуть загрузчики"
+                    contentDescription = if (viewModel.loadersExpanded) "Свернуть загрузчики" else "Развернуть загрузчики",
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
         }

@@ -210,7 +210,8 @@ fun AccountScreen(
                                 MicrosoftLoginState.Error -> ProgressState.Error
                                 else -> ProgressState.Loading
                             },
-                            error = loginError
+                            error = loginError,
+                            colors = colorScheme
                         )
                         if (loginState == MicrosoftLoginState.Error) {
                             TextButton(onClick = { viewModel.dismissLoginResult() }) { Text("Закрыть") }
