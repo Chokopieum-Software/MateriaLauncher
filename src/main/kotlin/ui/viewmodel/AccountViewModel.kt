@@ -16,9 +16,6 @@ class AccountViewModel(
     private val accountManager: AccountManager,
     private val coroutineScope: CoroutineScope
 ) {
-    private val _accounts = MutableStateFlow<List<Account>>(emptyList())
-    val accounts: StateFlow<List<Account>> = _accounts.asStateFlow()
-
     private val _isLoggingIn = MutableStateFlow(false)
     val isLoggingIn: StateFlow<Boolean> = _isLoggingIn.asStateFlow()
     private val _loginState = MutableStateFlow(MicrosoftLoginState.Idle)
@@ -29,16 +26,6 @@ class AccountViewModel(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    init {
-        loadAccounts()
-    }
-
-    fun loadAccounts() {
-        coroutineScope.launch {
-            _accounts.value = accountManager.loadAccounts()
-        }
-    }
-
     fun loginWithMicrosoft() {
         if (_isLoggingIn.value) return
         coroutineScope.launch {
@@ -48,7 +35,6 @@ class AccountViewModel(
             _errorMessage.value = null
             try {
                 withContext(Dispatchers.IO) { accountManager.loginWithMicrosoft() }
-                loadAccounts()
                 _loginState.value = MicrosoftLoginState.Success
             } catch (e: kotlinx.coroutines.CancellationException) {
                 _loginState.value = MicrosoftLoginState.Idle
@@ -72,7 +58,6 @@ class AccountViewModel(
         coroutineScope.launch {
             try {
                 withContext(Dispatchers.IO) { accountManager.logoutFromMicrosoft() }
-                loadAccounts()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -87,7 +72,6 @@ class AccountViewModel(
             try {
                 val newAccount = funlauncher.auth.OfflineAccount.create(username)
                 if (withContext(Dispatchers.IO) { accountManager.addAccount(newAccount) }) {
-                    loadAccounts()
                     onSuccess()
                 } else {
                     _errorMessage.value = "Аккаунт с таким именем уже существует."
@@ -104,7 +88,6 @@ class AccountViewModel(
         coroutineScope.launch {
             try {
                 withContext(Dispatchers.IO) { accountManager.deleteAccount(account) }
-                loadAccounts()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {

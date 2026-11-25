@@ -462,10 +462,8 @@ private fun CacheSettings(cacheManager: CacheManager) {
 
 @Composable
 private fun AboutScreen(onExitForUpdate: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    var latestChangelog by remember { mutableStateOf<LauncherChangelog?>(null) }
     var showChangelog by remember { mutableStateOf(false) }
-    if (showChangelog) LauncherChangelogDialog(latestChangelog) { showChangelog = false }
+    if (showChangelog) LauncherChangelogDialog(LauncherChangelog.bundled) { showChangelog = false }
     var showTechInfo by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
@@ -503,12 +501,7 @@ private fun AboutScreen(onExitForUpdate: () -> Unit) {
                 }
             }
             LauncherUpdateCard(onExitForUpdate)
-            OutlinedButton(onClick = {
-                scope.launch {
-                    latestChangelog = withContext(Dispatchers.IO) { LauncherChangelog.latest() }
-                    showChangelog = true
-                }
-            }) { Text("Что нового") }
+            OutlinedButton(onClick = { showChangelog = true }) { Text("История изменений") }
             OutlinedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                 TextButton(onClick = { showTechInfo = !showTechInfo }, modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(16.dp)) {

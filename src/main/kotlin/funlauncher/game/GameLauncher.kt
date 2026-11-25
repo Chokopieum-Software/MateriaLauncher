@@ -11,6 +11,7 @@ package funlauncher.game
 import funlauncher.BuildType
 import funlauncher.MinecraftBuild
 import funlauncher.auth.Account
+import funlauncher.auth.MicrosoftAccount
 import funlauncher.managers.PathManager
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -55,6 +56,11 @@ class GameLauncher(
         customJavaArgs: String,
         envVars: String
     ): LaunchPayload {
+        if (account is MicrosoftAccount) {
+            check(account.accessToken.isNotBlank() && account.accessToken != "0") {
+                "Не получен токен Minecraft для выбранного аккаунта. Войдите в Microsoft повторно."
+            }
+        }
         val options = funlauncher.utils.validateLaunchOptions(customJavaArgs, envVars, maxRamMb)
         require(options.valid) { (options.argumentErrors + options.environmentErrors).joinToString("\n") }
         extractNatives()
@@ -217,10 +223,11 @@ class GameLauncher(
         "game_directory" to gameDir.toAbsolutePath().toString(),
         "assets_root" to globalAssetsDir.toAbsolutePath().toString(),
         "assets_index_name" to (versionInfo.assetIndex?.id ?: "legacy"),
-        "auth_uuid" to (account.uuid ?: UUID.nameUUIDFromBytes(account.username.toByteArray()).toString()),
-        "auth_access_token" to (account.accessToken ?: "0"),
+        "auth_uuid" to account.uuid,
+        "auth_access_token" to account.accessToken,
+        "auth_session" to if (account is MicrosoftAccount) "token:${account.accessToken}:${account.uuid}" else "0",
         "user_properties" to "{}",
-        "user_type" to if (account.isLicensed) "msa" else "legacy",
+        "user_type" to if (account is MicrosoftAccount) "msa" else "legacy",
         "version_type" to build.type.name,
         "clientid" to "clientId",
         "auth_xuid" to "xuid",

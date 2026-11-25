@@ -6,8 +6,6 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import java.util.Properties
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
 internal object LauncherBuildState : Table("launcher_build_state") {
     val id = integer("id")
@@ -17,83 +15,51 @@ internal object LauncherBuildState : Table("launcher_build_state") {
     override val primaryKey = PrimaryKey(id)
 }
 
-@Serializable
-internal data class LauncherChangelog(val previous: Long, val current: Long, val changes: List<String>) {
-    companion object {
-        fun latest(): LauncherChangelog? = transaction {
-            LauncherBuildState.selectAll().singleOrNull()?.get(LauncherBuildState.lastChangelog)?.let {
-                Json.decodeFromString<LauncherChangelog>(it)
-            }
-        }
+internal object LauncherChangelog {
+    val bundled: String by lazy {
+        checkNotNull(javaClass.getResourceAsStream("/CHANGELOG.md")).bufferedReader().use { it.readText() }
+    }
 
-        fun onStartup(existingInstallation: Boolean): LauncherChangelog? {
-            val props = Properties()
-            LauncherChangelog::class.java.getResourceAsStream("/app.properties")?.use(props::load)
-            val number = props.getProperty("buildNumber")?.toLongOrNull() ?: return null
-            val commit = props.getProperty("gitHash") ?: return null
-            val releaseNumber = props.getProperty("previousReleaseBuild")?.toLongOrNull()
-            val releaseCommit = props.getProperty("previousReleaseCommit").orEmpty()
-            val release = if (releaseNumber != null && releaseNumber < number && releaseCommit.isNotBlank())
-                releaseNumber to releaseCommit else null
-            return record(number, commit, release, existingInstallation) { previousCommit ->
-                LauncherChangelog::class.java.getResourceAsStream("/launcher-commits.tsv")?.bufferedReader()?.use {
-                    changesSince(previousCommit, it.lineSequence())
-                }.orEmpty()
-            }
-        }
+    // Each release starts with a level-two heading. Ignore the document title and introduction.
+    private fun releases(markdown: String): List<String> =
+        markdown.replace("\r\n", "\n").split(Regex("(?m)(?=^## )"))
+            .map { it.trim() }.filter { it.startsWith("## ") }
 
-        internal fun record(
-            number: Long, commit: String, previousRelease: Pair<Long, String>? = null,
-            existingInstallation: Boolean = false, changes: (String) -> List<String>
-        ): LauncherChangelog? = transaction {
-            val state = LauncherBuildState
-            val previous = state.selectAll().singleOrNull()
-            when {
-                previous == null -> {
-                    val notes = previousRelease?.let { (base, hash) -> LauncherChangelog(base, number, changes(hash)) }
-                    state.insert {
-                        it[id] = 1
-                        it[state.number] = number
-                        it[state.commit] = commit
-                        it[lastChangelog] = notes?.let { log -> Json.encodeToString(log) }
-                    }
-                    notes.takeIf { existingInstallation }
-                }
-                number <= previous[state.number] -> null
-                else -> {
-                    val changelog = LauncherChangelog(previous[state.number], number, changes(previous[state.commit]))
-                    state.update {
-                        it[state.number] = number
-                        it[state.commit] = commit
-                        it[lastChangelog] = Json.encodeToString(changelog)
-                    }
-                    changelog
-                }
-            }
-        }
+    fun changesSince(previous: String?, current: String): String {
+        val sections = releases(current)
+        require(sections.isNotEmpty()) { "В журнале нет записей о версиях." }
+        val oldSections = previous?.let(::releases).orEmpty()
+        return (if (oldSections.isEmpty()) sections.take(1) else sections - oldSections.toSet())
+            .joinToString("\n\n")
+    }
 
-        // Git emits children before parents in topological order. Exclude everything
-        // reachable from the previous build, including ancestors on merged branches.
-        internal fun changesSince(previous: String, lines: Sequence<String>): List<String> {
-            val excluded = hashSetOf(previous)
-            val changes = mutableListOf<String>()
-            var found = false
-            for (line in lines) {
-                // Read trailers from the right so tabs in the subject remain intact.
-                val fields = line.split('\t')
-                if (fields.size < 3) continue
-                val (hash, parents, subject) = fields
-                if (hash == previous) found = true
-                if (hash in excluded) excluded.addAll(parents.split(' '))
-                else {
-                    val translations = if (fields.size >= 5) fields.takeLast(2).filter { it.isNotBlank() } else emptyList()
-                    changes += if (translations.isNotEmpty()) translations.joinToString("\n")
-                        else if (fields.size >= 5) fields.subList(2, fields.size - 2).joinToString(" ")
-                        else subject
-                }
+    fun onStartup(existingInstallation: Boolean): String? {
+        val props = Properties()
+        javaClass.getResourceAsStream("/app.properties")?.use(props::load)
+        val number = props.getProperty("buildNumber")?.toLongOrNull() ?: return null
+        return record(number, props.getProperty("gitHash").orEmpty(), bundled, existingInstallation)
+    }
+
+    internal fun record(number: Long, hash: String, markdown: String, existingInstallation: Boolean): String? = transaction {
+        val state = LauncherBuildState
+        val previous = state.selectAll().singleOrNull()
+        if (previous != null && number <= previous[state.number]) return@transaction null
+        // Older installations have JSON release notes in this column. They have no Markdown baseline.
+        val changes = changesSince(previous?.get(state.lastChangelog), markdown)
+        if (previous == null) {
+            state.insert {
+                it[id] = 1
+                it[state.number] = number
+                it[commit] = hash
+                it[lastChangelog] = markdown
             }
-            // A rewritten branch has no reliable range. Show its newest commit.
-            return if (found) changes else changes.take(1)
+        } else {
+            state.update {
+                it[state.number] = number
+                it[commit] = hash
+                it[lastChangelog] = markdown
+            }
         }
+        changes.takeIf { it.isNotBlank() && (previous != null || existingInstallation) }
     }
 }

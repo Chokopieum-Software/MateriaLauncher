@@ -66,6 +66,15 @@ object LauncherUpdates {
         return JsonParser.parseString(response.body()).asJsonObject
     }
 
+    fun releaseNotes(update: LauncherUpdate): String {
+        require(update.commit.matches(Regex("[0-9a-fA-F]{40}")))
+        val uri = URI("https://raw.githubusercontent.com/$REPOSITORY/${update.commit}/CHANGELOG.md")
+        val request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).GET().build()
+        val response = http.send(request, HttpResponse.BodyHandlers.ofString(Charsets.UTF_8))
+        check(response.statusCode() == 200) { "HTTP ${response.statusCode()}" }
+        return LauncherChangelog.changesSince(LauncherChangelog.bundled, response.body())
+    }
+
     /** Copy the tiny native executable out of the installation before replacing it. */
     fun start(target: Path, update: LauncherUpdate) {
         val source = target.resolve("updater/MateriaUpdater.exe")

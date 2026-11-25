@@ -13,6 +13,23 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import ui.dialogs.ChangelogContent
+
+@Composable
+private fun UpdateNotes(update: LauncherUpdate) {
+    var notes by remember(update.commit) { mutableStateOf<String?>(null) }
+    LaunchedEffect(update.commit) {
+        notes = try {
+            withContext(Dispatchers.IO) { LauncherUpdates.releaseNotes(update) }
+                .ifBlank { "Для этой сборки нет новых записей." }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            "Не удалось загрузить список изменений."
+        }
+    }
+    notes?.let { ChangelogContent(it) } ?: Text("Загрузка списка изменений…")
+}
 
 /** Lives above the tabs so navigation never repeats the startup check. */
 @Composable
@@ -42,6 +59,7 @@ internal fun StartupLauncherUpdateCheck(onExitForUpdate: () -> Unit) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Доступна сборка ${selected.buildNumber} (${selected.commit.take(7)}). Обновлятор установит её и снова запустит лаунчер.")
+                    UpdateNotes(selected)
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
@@ -88,6 +106,7 @@ internal fun LauncherUpdateCard(onExitForUpdate: () -> Unit) {
             Text("Последняя успешная сборка sunrise-dev")
             if (installation == null) Text("Автообновление доступно в установленной Windows-версии лаунчера.")
             message?.let { Text(it) }
+            latest?.let { UpdateNotes(it) }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(enabled = !busy && installation != null, onClick = {

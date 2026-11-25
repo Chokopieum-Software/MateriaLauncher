@@ -9,6 +9,19 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import kotlin.test.*
 
 class OfflineAccountStorageTest {
+    @Test fun offlineCreationRequiresLicensedMicrosoftAccount() = withDatabase {
+        val root = Files.createTempDirectory("materia-account-gate")
+        try {
+            val manager = AccountManager(funlauncher.managers.PathManager(root))
+            val offline = OfflineAccount.create("Local")
+            assertFailsWith<IllegalStateException> { manager.addAccount(offline) }
+            AccountDao().add(offline.copy(username = "Legacy", isLicensed = true))
+            AccountDao().add(MicrosoftAccount("Xbox", "uuid", "", isLicensed = false))
+            assertFailsWith<IllegalStateException> { manager.addAccount(offline) }
+            assertFalse(AccountDao().exists("Local"))
+        } finally { root.toFile().deleteRecursively() }
+    }
+
     @Test fun uuidMatchesMinecraftOfflineIdentity() {
         val account = OfflineAccount.create(" Notch ")
         assertEquals("Notch", account.username)

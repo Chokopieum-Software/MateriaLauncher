@@ -122,7 +122,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             mainClass = fabricProfile.mainClass,
             libraries = (fabricProfile.libraries + vanillaInfo.libraries).distinctBy { it.name },
             arguments = mergeArguments(vanillaInfo.arguments, fabricProfile.arguments),
-            gameArguments = fabricProfile.gameArguments ?: vanillaInfo.gameArguments
+            gameArguments = inheritLegacyAuthArguments(vanillaInfo.gameArguments, fabricProfile.gameArguments)
         )
     }
 
@@ -164,7 +164,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             mainClass = versionProfile.mainClass,
             libraries = (versionProfile.libraries + vanillaInfo.libraries).distinctBy { it.name },
             arguments = mergeArguments(vanillaInfo.arguments, versionProfile.arguments),
-            gameArguments = versionProfile.gameArguments ?: vanillaInfo.gameArguments
+            gameArguments = inheritLegacyAuthArguments(vanillaInfo.gameArguments, versionProfile.gameArguments)
         )
     }
 
@@ -186,7 +186,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             mainClass = quiltProfile.mainClass,
             libraries = (quiltProfile.libraries + vanillaInfo.libraries).distinctBy { it.name },
             arguments = mergeArguments(vanillaInfo.arguments, quiltProfile.arguments),
-            gameArguments = quiltProfile.gameArguments ?: vanillaInfo.gameArguments
+            gameArguments = inheritLegacyAuthArguments(vanillaInfo.gameArguments, quiltProfile.gameArguments)
         )
     }
 
@@ -234,7 +234,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
             mainClass = versionProfile.mainClass,
             libraries = (versionProfile.libraries + vanillaInfo.libraries).distinctBy { it.name },
             arguments = mergeArguments(vanillaInfo.arguments, versionProfile.arguments),
-            gameArguments = versionProfile.gameArguments ?: vanillaInfo.gameArguments
+            gameArguments = inheritLegacyAuthArguments(vanillaInfo.gameArguments, versionProfile.gameArguments)
         )
     }
 
@@ -285,7 +285,7 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
                 assetIndex = versionInfo.assetIndex ?: parentInfo.assetIndex,
                 assets = versionInfo.assets ?: parentInfo.assets,
                 downloads = versionInfo.downloads ?: parentInfo.downloads,
-                gameArguments = versionInfo.gameArguments ?: parentInfo.gameArguments,
+                gameArguments = inheritLegacyAuthArguments(parentInfo.gameArguments, versionInfo.gameArguments),
                 inheritsFrom = null // Clear inheritance after merging
             )
         }
@@ -325,6 +325,22 @@ class VersionMetadataFetcher(private val buildManager: BuildManager, private val
         jsonFile.parent.createDirectories()
         jsonFile.writeBytes(bytes)
         return json.decodeFromString(bytes.decodeToString())
+    }
+
+    private fun inheritLegacyAuthArguments(parent: String?, child: String?): String? {
+        if (child.isNullOrBlank()) return parent
+        if (parent.isNullOrBlank()) return child
+        val existing = funlauncher.utils.parseJavaArguments(child)
+        val identityFlags = setOf("--username", "--uuid", "--session", "--accessToken", "--userType")
+        val inherited = funlauncher.utils.parseJavaArguments(parent).zipWithNext().filter { (flag, value) ->
+            flag in identityFlags && flag !in existing && value.startsWith("\${") &&
+                !(flag == "--session" && "--accessToken" in existing) &&
+                !(flag == "--accessToken" && "--session" in existing)
+        }
+        return buildString {
+            append(child)
+            for ((flag, value) in inherited) append(" $flag $value")
+        }
     }
 
     internal fun mergeArguments(vanillaArgs: VersionInfo.Arguments?, otherArgs: VersionInfo.Arguments?): VersionInfo.Arguments? {

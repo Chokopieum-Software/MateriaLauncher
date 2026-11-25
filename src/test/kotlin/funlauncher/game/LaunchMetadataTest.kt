@@ -19,7 +19,7 @@ class LaunchMetadataTest {
         val root = Files.createTempDirectory("cached-forge")
         try {
             val paths = PathManager(root)
-            val parent = VersionInfo("1.12.2", gameArguments = "--username \${auth_player_name}")
+            val parent = VersionInfo("1.12.2", gameArguments = "--username \${auth_player_name} --uuid \${auth_uuid} --accessToken \${auth_access_token}")
             val child = VersionInfo("installed-forge", inheritsFrom = "1.12.2",
                 mainClass = "net.minecraft.launchwrapper.Launch",
                 gameArguments = "--username \${auth_player_name} --tweakClass ForgeTweaker",
@@ -40,8 +40,18 @@ class LaunchMetadataTest {
             val resolved = fetcher.getVersionInfo(build)
             assertNull(resolved.inheritsFrom)
             assertNull(resolved.arguments)
-            val command = GameLauncher(resolved, build, paths).createLaunchPayload(MicrosoftAccount("Player", "uuid", "secret-token"), "java", 1024, "", "").command
-            assertEquals("ForgeTweaker", command[command.indexOf("--tweakClass") + 1])
+            val launcher = GameLauncher(resolved, build, paths)
+            for (account in listOf(MicrosoftAccount("First", "uuid1", "first-token"),
+                    funlauncher.auth.OfflineAccount.create("Local"), MicrosoftAccount("Second", "uuid2", "second-token"))) {
+                val command = launcher.createLaunchPayload(account, "java", 1024, "", "").command
+                assertEquals(account.accessToken, command[command.indexOf("--accessToken") + 1])
+                assertEquals(account.uuid, command[command.indexOf("--uuid") + 1])
+                assertEquals(account.username, command[command.indexOf("--username") + 1])
+                assertEquals("ForgeTweaker", command[command.indexOf("--tweakClass") + 1])
+            }
+            assertFailsWith<IllegalStateException> {
+                launcher.createLaunchPayload(MicrosoftAccount("Second", "uuid2", ""), "java", 1024, "", "")
+            }
             assertContentEquals(byteArrayOf(1, 2, 3), paths.getNativesDir(build).resolve("test-native.bin").readBytes())
         } finally { root.toFile().deleteRecursively() }
     }

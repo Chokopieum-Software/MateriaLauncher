@@ -80,10 +80,13 @@ class AccountManager(pathManager: PathManager) {
     }
 
     fun hasLicensedAccount(): Boolean {
-        return _accounts.value.any { it.isLicensed }
+        return accountDao.getAll().filterIsInstance<MicrosoftAccount>().any {
+            it.isLicensed && !SecureAuthStore.get("Minecraft:${it.uuid}").isNullOrBlank()
+        }
     }
 
-    fun addAccount(account: Account): Boolean {
+    fun addAccount(account: OfflineAccount): Boolean = synchronized(MateriaAuthenticator.sessionLock) {
+        check(hasLicensedAccount()) { "Для создания офлайн-аккаунта войдите в Microsoft с лицензией Minecraft Java." }
         if (accountDao.exists(account.username)) {
             println("Аккаунт с именем ${account.username} уже существует.")
             return false
@@ -91,7 +94,7 @@ class AccountManager(pathManager: PathManager) {
 
         accountDao.add(account)
         _accounts.value = accountDao.getAll()
-        return true
+        true
     }
 
     fun loginWithMicrosoft(): Boolean = synchronized(MateriaAuthenticator.sessionLock) {

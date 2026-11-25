@@ -54,9 +54,14 @@ fun AccountScreen(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val viewModel = remember { AccountViewModel(accountManager, coroutineScope) }
-    val accounts by viewModel.accounts.collectAsState()
-    val isLoggingIn by viewModel.isLoggingIn.collectAsState()
+    val accounts by accountManager.accountsFlow.collectAsState()
     val loginState by viewModel.loginState.collectAsState()
+    val canCreateOffline by produceState(false, accounts, loginState) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { accountManager.hasLicensedAccount() }.getOrDefault(false)
+        }
+    }
+    val isLoggingIn by viewModel.isLoggingIn.collectAsState()
     val loginError by viewModel.loginError.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
@@ -225,7 +230,9 @@ fun AccountScreen(
             AlertDialog(
                 onDismissRequest = { showAddAccountTypeDialog = false },
                 title = { Text("Выберите тип аккаунта", color = colorScheme.onSurface) },
-                text = { Text("Какой аккаунт вы хотите добавить?", color = colorScheme.onSurfaceVariant) },
+                text = { Text(if (canCreateOffline) "Какой аккаунт вы хотите добавить?"
+                    else "Для создания офлайн-аккаунта войдите в Microsoft с лицензией Minecraft Java.",
+                    color = colorScheme.onSurfaceVariant) },
                 containerColor = colorScheme.surface,
                 confirmButton = {
                     Button(
@@ -241,6 +248,7 @@ fun AccountScreen(
                 },
                 dismissButton = {
                     Button(
+                        enabled = canCreateOffline,
                         onClick = {
                             showAddAccountTypeDialog = false
                             showAddOfflineAccountDialog = true
@@ -288,6 +296,7 @@ fun AccountScreen(
                                 showAddOfflineAccountDialog = false
                             }
                         },
+                        enabled = canCreateOffline,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colorScheme.primary,
                             contentColor = colorScheme.onPrimary

@@ -121,8 +121,6 @@ val appBuildNumber = providers.gradleProperty("buildNumber")
 val buildSource = providers.environmentVariable("BUILD_SOURCE").getOrElse("Local")
 val releaseChannel = buildProps.getProperty("channel", "Stable")
 val gitHash = fetchGitHash()
-val previousReleaseBuild = providers.environmentVariable("PREVIOUS_RELEASE_BUILD").getOrElse("")
-val previousReleaseCommit = providers.environmentVariable("PREVIOUS_RELEASE_COMMIT").getOrElse("")
 
 // The native updater is shipped beside the launcher, including in both installers.
 afterEvaluate {
@@ -155,6 +153,7 @@ group = "org.chokopieum.software"
 version = appVersion
 
 dependencies {
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.46.0")
     implementation(project(":catalog"))
     implementation(project(":catalog-provider-api"))
     implementation(project(":providers:modrinth"))
@@ -284,36 +283,20 @@ tasks.named<Copy>("processResources") {
     dependsOn(generateCoverIndex)
     inputs.property("appVersion", appVersion)
     inputs.property("appBuildNumber", appBuildNumber)
-    inputs.property("previousReleaseBuild", previousReleaseBuild)
-    inputs.property("previousReleaseCommit", previousReleaseCommit)
     inputs.property("buildSource", buildSource)
     inputs.property("gitHash", gitHash)
     inputs.property("isTestBuild", isTestBuild)
     inputs.property("releaseChannel", releaseChannel)
+    from(rootProject.file("CHANGELOG.md"))
     from(coverFiles) { into("covers") }
     from(layout.buildDirectory.dir("generated/coverResources"))
     doLast {
         val props = Properties()
-        val history = file("$destinationDir/launcher-commits.tsv")
-        if (appBuildNumber.toLongOrNull() != null) {
-            val log = providers.exec {
-                workingDir(rootDir)
-                val trailers = listOf("Changelog-ru", "Changelog-en").joinToString("%x09") {
-                    "%(trailers:key=$it,valueonly,unfold=true,separator=%x20)"
-                }
-                commandLine("git", "log", "--topo-order", "--encoding=UTF-8", "--format=%H%x09%P%x09%s%x09$trailers", gitHash, "--")
-            }
-            history.writeBytes(log.standardOutput.asBytes.get())
-        } else {
-            history.writeText("")
-        }
         props.setProperty("version", appVersion)
         props.setProperty("channel", releaseChannel)
         props.setProperty("buildNumber", appBuildNumber)
         props.setProperty("buildSource", buildSource)
         props.setProperty("gitHash", gitHash)
-        props.setProperty("previousReleaseBuild", previousReleaseBuild)
-        props.setProperty("previousReleaseCommit", previousReleaseCommit)
         props.setProperty("isTestBuild", isTestBuild.toString())
 
         val wrapperProps = Properties()

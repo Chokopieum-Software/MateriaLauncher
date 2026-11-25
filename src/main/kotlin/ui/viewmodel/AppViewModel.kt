@@ -82,9 +82,10 @@ class AppViewModel(
         accountManager.accountsFlow
             .onEach { updatedAccounts ->
                 accounts = updatedAccounts
-                if (currentAccount == null || currentAccount !in updatedAccounts) {
-                    currentAccount = updatedAccounts.firstOrNull()
-                }
+                val selected = currentAccount
+                currentAccount = updatedAccounts.firstOrNull {
+                    selected != null && it::class == selected::class && it.uuid == selected.uuid
+                } ?: updatedAccounts.firstOrNull()
             }
             .launchIn(viewModelScope)
     }
